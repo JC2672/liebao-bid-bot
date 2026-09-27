@@ -1,22 +1,24 @@
-"""Jobright login session, held in a dedicated Playwright-managed Chromium
-profile - not the user's own daily Chrome (that would need a companion
-browser extension, deferred; see docs/ARCHITECTURE.md).
+"""Jobright login session, held in the user's REAL browser - not a separate
+automation profile (an earlier version of this used a dedicated Playwright-
+managed Chromium window the user had to log into a second time; that was the
+wrong shape for this and has been replaced).
 
 Flow:
-  1. Frontend checks GET /sources/jobright/status.
-  2. If not logged in, POST /sources/jobright/login/start opens a VISIBLE
-     Chromium window on Jobright's login page and returns immediately - the
-     browser stays open (held in _active_login) across requests.
-  3. User signs in by hand in that window; the frontend then calls
-     POST /sources/jobright/login/finish, which saves the session
-     (Playwright storage_state: cookies) to disk and closes the window.
-  4. jobright_source.py loads the saved cookies and attaches them as a plain
+  1. The companion Chrome extension (extension/) reads the user's actual
+     jobright.ai cookies from their own already-open Chrome via
+     chrome.cookies, which only an extension can do - an ordinary web page
+     can't read another origin's cookies itself.
+  2. The extension POSTs those cookies to /sources/jobright/cookies here,
+     which saves them and reports back whether they actually work.
+  3. jobright_source.py loads the saved cookies and attaches them as a plain
      Cookie header on ordinary `requests` calls to Jobright's real internal
-     API - no browser needed for the fetch itself, only for the one-time
-     login. Confirmed live: that API returns a clean, unambiguous signal for
-     an invalid/missing session (HTTP 401, {"success": false, "errorCode":
-     41001, "errorMsg": "Cookie not found"}), which is what check_session()
-     relies on.
+     API - no browser involved in the fetch itself, only in obtaining the
+     cookies in the first place.
+
+check_session() makes one cheap real request rather than trusting that a
+saved file merely exists: confirmed live that Jobright's real API returns a
+clean, unambiguous signal for an invalid/missing session (HTTP 401,
+{"success": false, "errorCode": 41001, "errorMsg": "Cookie not found"}).
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ from pathlib import Path
 import requests
 
 SESSION_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "browser-sessions" / "jobright"
-STATE_PATH = SESSION_DIR / "storage_state.json"
+COOKIES_PATH = SESSION_DIR / "cookies.json"
 
 API_ORIGIN = "https://jobright.ai"
 DEFAULT_HEADERS = {
@@ -36,18 +38,21 @@ DEFAULT_HEADERS = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
 
-# Holds the live Playwright objects for an in-progress interactive login,
-# across the separate start/finish HTTP requests. Empty when no login is
-# in progress. Single-user local app, so a module-level dict is fine.
-_active_login: dict = {}
+
+def save_cookies(cookies: list[dict]) -> None:
+    """`cookies`: [{"name": ..., "value": ..., "domain": ...}, ...], exactly
+    the shape chrome.cookies.getAll() returns (extra fields are fine, only
+    name/value/domain are read back)."""
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    COOKIES_PATH.write_text(json.dumps({"cookies": cookies}, indent=2), encoding="utf-8")
 
 
 def get_cookie_header() -> str:
-    """Cookie header string for jobright.ai, or "" if never logged in."""
-    if not STATE_PATH.exists():
+    """Cookie header string for jobright.ai, or "" if no session saved yet."""
+    if not COOKIES_PATH.exists():
         return ""
     try:
-        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        state = json.loads(COOKIES_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return ""
     cookies = state.get("cookies", [])
@@ -56,8 +61,6 @@ def get_cookie_header() -> str:
 
 
 def check_session() -> bool:
-    """Makes one cheap real request to confirm the saved session still
-    works, rather than trusting that a storage_state file merely exists."""
     cookie = get_cookie_header()
     if not cookie:
         return False
@@ -82,51 +85,3 @@ def check_session() -> bool:
         return resp.status_code == 200 and resp.json().get("success") is True
     except (requests.RequestException, ValueError):
         return False
-
-
-def login_in_progress() -> bool:
-    return bool(_active_login)
-
-
-def start_login() -> None:
-    if _active_login:
-        return
-    from playwright.sync_api import sync_playwright  # local import: only needed for login
-
-    pw = sync_playwright().start()
-    browser = pw.chromium.launch(headless=False)
-    context = browser.new_context(viewport={"width": 1280, "height": 900})
-    page = context.new_page()
-    page.goto("https://jobright.ai/jobs/search", wait_until="domcontentloaded", timeout=60000)
-    _active_login.update(playwright=pw, browser=browser, context=context)
-
-
-def finish_login() -> bool:
-    """Saves the session from the still-open login window. Returns whether
-    it looks like a real logged-in session was actually captured."""
-    if not _active_login:
-        return False
-    try:
-        SESSION_DIR.mkdir(parents=True, exist_ok=True)
-        _active_login["context"].storage_state(path=str(STATE_PATH))
-    finally:
-        _close_active_login()
-    return check_session()
-
-
-def cancel_login() -> None:
-    _close_active_login()
-
-
-def _close_active_login() -> None:
-    if not _active_login:
-        return
-    try:
-        _active_login["browser"].close()
-    except Exception:  # noqa: BLE001 - user may have already closed the window by hand
-        pass
-    try:
-        _active_login["playwright"].stop()
-    except Exception:  # noqa: BLE001
-        pass
-    _active_login.clear()

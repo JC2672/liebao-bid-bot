@@ -198,24 +198,3 @@ export async function openFolder(id: number) {
   await api.post(`/queue/${id}/open-folder`);
 }
 
-export interface JobrightStatus {
-  logged_in: boolean;
-  login_in_progress: boolean;
-}
-
-export async function getJobrightStatus() {
-  const { data } = await api.get<JobrightStatus>("/sources/jobright/status");
-  return data;
-}
-
-export async function startJobrightLogin() {
-  await api.post("/sources/jobright/login/start");
-}
-
-export async function finishJobrightLogin() {
-  await api.post("/sources/jobright/login/finish");
-}
-
-export async function cancelJobrightLogin() {
-  await api.post("/sources/jobright/login/cancel");
-}

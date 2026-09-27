@@ -39,6 +39,13 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 
+### Companion Chrome extension (optional, only needed for Jobright's full results)
+
+Load `extension/` unpacked (`chrome://extensions` → Developer mode → Load
+unpacked). See `extension/README.md`. Without it, Jobright still works, just
+capped at anonymous-only results (~20, and currently sometimes blocked by a
+Cloudflare challenge Jobright added to its anonymous page).
+
 ### Profiles
 
 Create profiles from the app's **Profiles** tab (name, contact info, output

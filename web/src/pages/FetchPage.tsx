@@ -1,17 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  cancelJobrightLogin,
-  exportShortlist,
-  finishJobrightLogin,
-  getJobrightStatus,
-  runFetch,
-  sourceIconUrl,
-  startJobrightLogin,
-  SOURCE_OPTIONS,
-  type FetchCounts,
-  type GateResult,
-} from "../lib/api";
+import { exportShortlist, runFetch, sourceIconUrl, SOURCE_OPTIONS, type FetchCounts, type GateResult } from "../lib/api";
+import { checkJobrightSession, isExtensionInstalled, openJobrightLoginTab } from "../lib/extensionBridge";
 import { Badge, Button, Card, FlagBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
 export function FetchPage() {
@@ -23,28 +13,19 @@ export function FetchPage() {
   const [counts, setCounts] = useState<FetchCounts | null>(null);
   const [showRejected, setShowRejected] = useState(false);
   const [includeRejectedInExport, setIncludeRejectedInExport] = useState(false);
+  const [jobrightNotice, setJobrightNotice] = useState<string | null>(null);
 
   const jobrightSelected = sources.includes("jobright");
+  // Live status badge - reads the user's REAL browser session via the
+  // companion extension (see lib/extensionBridge.ts), not a separate
+  // automation profile. Re-checked fresh right before every fetch too.
   const jobrightStatusQuery = useQuery({
-    queryKey: ["jobright-status"],
-    queryFn: getJobrightStatus,
+    queryKey: ["jobright-session"],
+    queryFn: async () => {
+      if (!(await isExtensionInstalled())) return { extension: false, loggedIn: false };
+      return { extension: true, loggedIn: await checkJobrightSession() };
+    },
     enabled: jobrightSelected,
-    refetchInterval: (query) => (query.state.data?.login_in_progress ? 3000 : false),
-  });
-  const invalidateJobrightStatus = () =>
-    queryClient.invalidateQueries({ queryKey: ["jobright-status"] });
-  const jobrightLoginStart = useMutation({
-    mutationFn: startJobrightLogin,
-    onSuccess: invalidateJobrightStatus,
-  });
-  const jobrightLoginFinish = useMutation({
-    mutationFn: finishJobrightLogin,
-    onSuccess: invalidateJobrightStatus,
-    onError: invalidateJobrightStatus,
-  });
-  const jobrightLoginCancel = useMutation({
-    mutationFn: cancelJobrightLogin,
-    onSuccess: invalidateJobrightStatus,
   });
 
   const fetchMutation = useMutation({
@@ -69,7 +50,7 @@ export function FetchPage() {
     setSources((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   }
 
-  function handleRunFetch() {
+  async function handleRunFetch() {
     // Only prompt when there's something to lose - an empty or already-
     // cleared list runs straight away.
     if (
@@ -78,18 +59,26 @@ export function FetchPage() {
     ) {
       return;
     }
-    if (jobrightSelected && jobrightStatusQuery.data?.logged_in === false) {
-      if (
-        !confirm(
-          "Jobright: not signed in. Without signing in, it's limited to ~20 anonymous " +
-            "results (and may currently return none - Jobright started showing a " +
-            "security challenge to anonymous requests). Sign in below for full results, " +
-            "or continue anyway?",
-        )
-      ) {
-        return;
+
+    setJobrightNotice(null);
+    if (jobrightSelected) {
+      if (!(await isExtensionInstalled())) {
+        setJobrightNotice(
+          "Companion extension not detected - continuing with Jobright's anonymous access only (limited to ~20 results, and may currently be blocked - see Profiles/docs).",
+        );
+      } else {
+        const loggedIn = await checkJobrightSession();
+        queryClient.setQueryData(["jobright-session"], { extension: true, loggedIn });
+        if (!loggedIn) {
+          await openJobrightLoginTab();
+          setJobrightNotice(
+            "Opened a Jobright sign-in tab in your browser - sign in there, then click Run Fetch again.",
+          );
+          return; // don't fetch this round - wait for the user to actually sign in
+        }
       }
     }
+
     fetchMutation.mutate();
   }
 
@@ -129,39 +118,14 @@ export function FetchPage() {
             </div>
             {jobrightSelected && (
               <div className="mt-2">
-                {jobrightStatusQuery.data?.login_in_progress ? (
-                  <div className="flex items-center gap-2">
-                    <Badge tone="warn">Jobright: sign in in the opened window…</Badge>
-                    <Button
-                      variant="secondary"
-                      disabled={jobrightLoginFinish.isPending}
-                      onClick={() => jobrightLoginFinish.mutate()}
-                    >
-                      I've signed in
-                    </Button>
-                    <Button variant="ghost" onClick={() => jobrightLoginCancel.mutate()}>
-                      Cancel
-                    </Button>
-                  </div>
-                ) : jobrightStatusQuery.data?.logged_in ? (
-                  <Badge tone="good">Jobright: signed in</Badge>
+                {jobrightStatusQuery.isLoading ? (
+                  <Badge>Jobright: checking your browser…</Badge>
+                ) : !jobrightStatusQuery.data?.extension ? (
+                  <Badge tone="warn">Jobright: companion extension not detected</Badge>
+                ) : jobrightStatusQuery.data.loggedIn ? (
+                  <Badge tone="good">Jobright: signed in (your browser)</Badge>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <Badge tone="warn">Jobright: not signed in (limited results)</Badge>
-                    <Button
-                      variant="secondary"
-                      disabled={jobrightLoginStart.isPending}
-                      onClick={() => jobrightLoginStart.mutate()}
-                    >
-                      Sign in to Jobright…
-                    </Button>
-                  </div>
-                )}
-                {jobrightLoginFinish.isError && (
-                  <p className="mt-1 text-xs text-bad">
-                    Didn't detect a valid session - make sure you finished signing in before
-                    clicking "I've signed in".
-                  </p>
+                  <Badge tone="warn">Jobright: not signed in - Run Fetch will open a sign-in tab</Badge>
                 )}
               </div>
             )}
@@ -205,6 +169,7 @@ export function FetchPage() {
           )}
         </div>
 
+        {jobrightNotice && <p className="mt-3 text-sm text-warn">{jobrightNotice}</p>}
         {fetchMutation.isError && (
           <p className="mt-3 text-sm text-bad">Fetch failed. Is the backend running on :8000?</p>
         )}

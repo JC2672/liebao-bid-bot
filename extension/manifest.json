@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "liebao-bid-bot companion",
+  "version": "0.1.0",
+  "description": "Lets the liebao-bid-bot web app check your real browser's login session for sources that need it (starting with Jobright), and open a login tab when needed.",
+  "permissions": ["cookies", "tabs"],
+  "host_permissions": [
+    "https://jobright.ai/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1:5173/*", "http://localhost:5173/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

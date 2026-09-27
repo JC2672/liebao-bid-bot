@@ -1,39 +1,31 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
+from pydantic import BaseModel
 
 from .. import jobright_session as session
 
 router = APIRouter(prefix="/sources/jobright", tags=["jobright-session"])
 
 
+class CookiePayload(BaseModel):
+    name: str
+    value: str
+    domain: str = ""
+
+
+class CookiesRequest(BaseModel):
+    cookies: list[CookiePayload]
+
+
 @router.get("/status")
 def get_status() -> dict:
-    return {
-        "logged_in": session.check_session(),
-        "login_in_progress": session.login_in_progress(),
-    }
+    return {"logged_in": session.check_session()}
 
 
-@router.post("/login/start")
-def login_start() -> dict:
-    session.start_login()
-    return {"ok": True}
-
-
-@router.post("/login/finish")
-def login_finish() -> dict:
-    logged_in = session.finish_login()
-    if not logged_in:
-        raise HTTPException(
-            400,
-            "No active login to finish, or the saved session doesn't look "
-            "valid - make sure you completed sign-in in the opened window.",
-        )
-    return {"ok": True, "logged_in": True}
-
-
-@router.post("/login/cancel")
-def login_cancel() -> dict:
-    session.cancel_login()
-    return {"ok": True}
+@router.post("/cookies")
+def receive_cookies(body: CookiesRequest) -> dict:
+    """Called by the companion Chrome extension after reading the user's
+    real jobright.ai cookies from their own browser."""
+    session.save_cookies([c.model_dump() for c in body.cookies])
+    return {"logged_in": session.check_session()}

@@ -184,45 +184,57 @@ deliberate anti-scraping measure, not something worth working around.
 **Login-gated sources:** built for Jobright, the first source that actually
 benefits from it (its authenticated API returns far more than the ~20-result
 anonymous cap, and the anonymous page itself is now Cloudflare-challenged -
-see above). This is a **dedicated Playwright-managed Chromium profile**
-(`app/jobright_session.py`, session saved to `data/browser-sessions/jobright/`
-- gitignored), not the user's own daily Chrome (that would need a companion
-browser extension - deferred until Phase 3 actually needs one for other
-reasons too):
+see above). This uses the user's **real, already-open Chrome** via a small
+companion extension (`extension/` - plain Manifest V3, no build step, loaded
+unpacked; see its own README) - not a separate automation profile the user
+would have to log into a second time (an earlier version of this did exactly
+that and was the wrong shape for it).
 
-- `GET /sources/jobright/status` -> `{logged_in, login_in_progress}`. The
-  logged-in check is a real live request to the authenticated API (asking
-  "does this session actually still work?"), not just "does a session file
-  exist" - a saved-but-expired session reports `logged_in: false`.
-- `POST /sources/jobright/login/start` opens a **visible** Chromium window on
-  Jobright's login page and returns immediately; the browser stays open
-  (held in a module-level dict) across requests while the user signs in by
-  hand.
-- `POST /sources/jobright/login/finish` (called when the user clicks "I've
-  signed in" in the Fetch tab) saves `context.storage_state()` (cookies) to
-  disk and closes the window - fails with a clear 400 if what got saved
-  doesn't actually pass the live session check (e.g. the user never actually
-  signed in), rather than silently saving a dead session.
-- `POST /sources/jobright/login/cancel` closes the window without saving.
-- `jobright_source.py` loads the saved cookies and attaches them as a plain
-  `Cookie` header on ordinary `requests` calls to the real API - no browser
-  needed for the fetch itself, only for the one-time interactive login.
+How it fits together:
+- `extension/content-script.js` runs only on the web app's own origin
+  (`localhost`/`127.0.0.1:5173`) and relays `window.postMessage` calls from
+  the page to `extension/background.js` (a service worker) and back -
+  content scripts can't call `chrome.cookies`/`chrome.tabs` directly, only
+  the background script can.
+- `background.js` handles two messages: read the user's actual
+  `jobright.ai` cookies (`chrome.cookies.getAll`) and POST them to the local
+  backend, or open a new tab to Jobright's login page
+  (`chrome.tabs.create`).
+- `web/src/lib/extensionBridge.ts` is the frontend half of that handshake:
+  `isExtensionInstalled()` (a "ready" ping the content script sends so the
+  page can tell whether the extension exists at all, rather than hanging
+  forever), `checkJobrightSession()`, `openJobrightLoginTab()`.
+- `POST /sources/jobright/cookies` (backend) receives those cookies from
+  the extension and saves them to `data/browser-sessions/jobright/` -
+  gitignored - returning whether they actually work: a real live request to
+  the authenticated API, not just "were cookies received" (confirmed live:
+  Jobright's API returns a clean, unambiguous signal for an invalid/missing
+  session - HTTP 401, `{"success": false, "errorCode": 41001, "errorMsg":
+  "Cookie not found"}`).
+- `jobright_source.py` loads those saved cookies and attaches them as a
+  plain `Cookie` header on ordinary `requests` calls to the real API - no
+  browser involved in the fetch itself, only in obtaining the cookies.
   Falls back to the anonymous path automatically when no valid session
   exists.
 
-Fetch tab UI: when Jobright is selected, shows its live status inline
-(signed in / not signed in, with a Sign-in button) and warns - but doesn't
-block - if you try to fetch without being signed in.
+Fetch tab UI/flow, run fresh on every Run Fetch click when Jobright is
+selected (not just checked once and cached): if the extension isn't
+detected at all, warn and continue with anonymous access only; if the
+extension is present but the session check comes back not-logged-in, open
+a Jobright sign-in tab automatically, show a message to sign in and click
+Run Fetch again, and **don't fetch this round** - the second click, now
+signed in, goes through normally.
 
-Not yet verified with a real Jobright account (I have none) - the mechanics
-(start/finish/cancel, graceful failure when no real login happens, falling
-back to the anonymous path) are all confirmed working, but the authenticated
-`/swan/recommend/search` response shape is assumed to match the sibling
-project's mapping, not independently confirmed against real logged-in data.
+Not yet verified with a real Jobright account (I have none) - the
+end-to-end mechanics (cookie relay, live session validation, falling back
+to the anonymous path) are all confirmed working with synthetic cookies,
+but the authenticated `/swan/recommend/search` response shape is assumed to
+match a sibling project's equivalent client, not independently confirmed
+against real logged-in data.
 
 For any other source that turns out to be genuinely account-gated, the same
-pattern applies: one dedicated Playwright profile per source, same
-start/finish/cancel/status shape.
+extension can grow another cookie-domain + message-type pair rather than
+needing a whole new mechanism.
 
 **Open question, not yet decided:** whether to keep scraping LinkedIn at all.
 A comparable local project (a sibling job-capture tool covering much of this
@@ -292,8 +304,11 @@ liebao-bid-bot/
 │  │  └─ <profile-name>/ profile.json, prompt.md, template.html
 │  └─ pyproject.toml
 ├─ web/                         # React app
-├─ extension/                   # WXT ChatGPT worker
-├─ data/                        # gitignored: sqlite db, staging/
+├─ extension/                   # companion extension (Jobright session today;
+│                                #   Phase 3's ChatGPT-web worker likely lives
+│                                #   here too - plain Manifest V3 for now, no
+│                                #   WXT build step, since nothing has needed one yet)
+├─ data/                        # gitignored: sqlite db, staging/, browser-sessions/
 └─ docs/
    └─ ARCHITECTURE.md
 ```
