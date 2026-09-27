@@ -1,9 +1,13 @@
 import { useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  cancelJobrightLogin,
   exportShortlist,
+  finishJobrightLogin,
+  getJobrightStatus,
   runFetch,
   sourceIconUrl,
+  startJobrightLogin,
   SOURCE_OPTIONS,
   type FetchCounts,
   type GateResult,
@@ -11,6 +15,7 @@ import {
 import { Badge, Button, Card, FlagBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
 export function FetchPage() {
+  const queryClient = useQueryClient();
   const [sources, setSources] = useState<string[]>(["linkedin", "indeed"]);
   const [query, setQuery] = useState("Salesforce");
   const [postedWithinDays, setPostedWithinDays] = useState(7);
@@ -18,6 +23,29 @@ export function FetchPage() {
   const [counts, setCounts] = useState<FetchCounts | null>(null);
   const [showRejected, setShowRejected] = useState(false);
   const [includeRejectedInExport, setIncludeRejectedInExport] = useState(false);
+
+  const jobrightSelected = sources.includes("jobright");
+  const jobrightStatusQuery = useQuery({
+    queryKey: ["jobright-status"],
+    queryFn: getJobrightStatus,
+    enabled: jobrightSelected,
+    refetchInterval: (query) => (query.state.data?.login_in_progress ? 3000 : false),
+  });
+  const invalidateJobrightStatus = () =>
+    queryClient.invalidateQueries({ queryKey: ["jobright-status"] });
+  const jobrightLoginStart = useMutation({
+    mutationFn: startJobrightLogin,
+    onSuccess: invalidateJobrightStatus,
+  });
+  const jobrightLoginFinish = useMutation({
+    mutationFn: finishJobrightLogin,
+    onSuccess: invalidateJobrightStatus,
+    onError: invalidateJobrightStatus,
+  });
+  const jobrightLoginCancel = useMutation({
+    mutationFn: cancelJobrightLogin,
+    onSuccess: invalidateJobrightStatus,
+  });
 
   const fetchMutation = useMutation({
     mutationFn: () => runFetch(sources, query, postedWithinDays),
@@ -49,6 +77,18 @@ export function FetchPage() {
       !confirm(`Discard the current list of ${results.length} fetched jobs and run a new fetch?`)
     ) {
       return;
+    }
+    if (jobrightSelected && jobrightStatusQuery.data?.logged_in === false) {
+      if (
+        !confirm(
+          "Jobright: not signed in. Without signing in, it's limited to ~20 anonymous " +
+            "results (and may currently return none - Jobright started showing a " +
+            "security challenge to anonymous requests). Sign in below for full results, " +
+            "or continue anyway?",
+        )
+      ) {
+        return;
+      }
     }
     fetchMutation.mutate();
   }
@@ -87,6 +127,44 @@ export function FetchPage() {
                 </button>
               ))}
             </div>
+            {jobrightSelected && (
+              <div className="mt-2">
+                {jobrightStatusQuery.data?.login_in_progress ? (
+                  <div className="flex items-center gap-2">
+                    <Badge tone="warn">Jobright: sign in in the opened window…</Badge>
+                    <Button
+                      variant="secondary"
+                      disabled={jobrightLoginFinish.isPending}
+                      onClick={() => jobrightLoginFinish.mutate()}
+                    >
+                      I've signed in
+                    </Button>
+                    <Button variant="ghost" onClick={() => jobrightLoginCancel.mutate()}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : jobrightStatusQuery.data?.logged_in ? (
+                  <Badge tone="good">Jobright: signed in</Badge>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Badge tone="warn">Jobright: not signed in (limited results)</Badge>
+                    <Button
+                      variant="secondary"
+                      disabled={jobrightLoginStart.isPending}
+                      onClick={() => jobrightLoginStart.mutate()}
+                    >
+                      Sign in to Jobright…
+                    </Button>
+                  </div>
+                )}
+                {jobrightLoginFinish.isError && (
+                  <p className="mt-1 text-xs text-bad">
+                    Didn't detect a valid session - make sure you finished signing in before
+                    clicking "I've signed in".
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">

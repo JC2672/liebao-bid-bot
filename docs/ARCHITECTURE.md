@@ -162,7 +162,7 @@ before being added, not assumed from a doc or another project's config:
 | Remotive | public JSON API | keeps to its own asked rate limit (fetch is on-demand only, never polled) |
 | RemoteOK | public JSON API, plain `requests` | `curl` on Windows hangs against this host (schannel TLS quirk) - `requests`/urllib3 has no such issue. `tags` is an exact single-word match, not free text - first word of the query is used as the tag, falling back to a client-side filter over the general feed if that tag doesn't exist |
 | We Work Remotely | public RSS (combined "all jobs" feed, no keyword param) | |
-| Jobright | plain `requests`, reads the page's embedded `__NEXT_DATA__` JSON | richest data of any source (salary, H1B signal, seniority, remote/hybrid); only page 1 (~20 results) is reachable - `&page=` doesn't paginate the SSR payload, and (checked directly in a real browser: scrolled, watched network requests, inspected every button) there is no "Next"/"Load more"/infinite-scroll for anonymous visitors to click either, unlike Talent.com above. The site's real paginated API (`/swan/recommend/search`) only exists for logged-in sessions - getting more than page 1 would mean the login/persistent-session mechanism described under "Login-gated sources" below, not just clicking something |
+| Jobright | plain `requests` - anonymous (`__NEXT_DATA__` JSON) or authenticated (`/swan/recommend/search`), whichever session is available | anonymous: page 1 only (~20 results, no pagination control exists to click, unlike Talent.com), and as of this writing the anonymous search *page* has started showing a Cloudflare "Security check" challenge (confirmed live - it returned clean, rich results earlier in this project; the same request now returns a challenge page). The API endpoint itself is unaffected (confirmed: still returns a clean JSON 401 for a missing/bad session, not a challenge) - see "Login-gated sources" below, now built |
 | Jobgether | **Playwright** (headless Chromium), DOM read | plain requests get HTTP 403 from Cloudflare on this one specifically; a real browser gets through with no login involved |
 | Himalayas | public JSON API, plain `requests` | its `/jobs/api/search?q=` endpoint is documented (in its own OpenAPI spec) but returns a live 404 - confirmed with a cache-busting param to rule out a stale CDN cache. Only `/jobs/api` (browse, cursor-paginated) is actually live, so this pulls a few pages of the most recent postings and filters client-side |
 | Jobicy | public JSON API | `tag` param genuinely filters server-side (unlike RemoteOK's); each job carries a real `jobGeo` field |
@@ -181,12 +181,48 @@ behind **Firebase App Check**, a purpose-built anti-automation service
 visit hit a 403 that self-throttled further attempts for 24 hours. That's a
 deliberate anti-scraping measure, not something worth working around.
 
-**Login-gated sources:** none needed one so far. If a genuinely account-gated
-source comes up later, the plan is a Playwright **persistent-context**
-profile per source: a "Sign in" action opens a real, visible browser window
-for the user to log in once, the resulting `storage_state` (cookies) is saved
-to disk, and later headless fetches reuse it. Not built, because nothing has
-required it yet.
+**Login-gated sources:** built for Jobright, the first source that actually
+benefits from it (its authenticated API returns far more than the ~20-result
+anonymous cap, and the anonymous page itself is now Cloudflare-challenged -
+see above). This is a **dedicated Playwright-managed Chromium profile**
+(`app/jobright_session.py`, session saved to `data/browser-sessions/jobright/`
+- gitignored), not the user's own daily Chrome (that would need a companion
+browser extension - deferred until Phase 3 actually needs one for other
+reasons too):
+
+- `GET /sources/jobright/status` -> `{logged_in, login_in_progress}`. The
+  logged-in check is a real live request to the authenticated API (asking
+  "does this session actually still work?"), not just "does a session file
+  exist" - a saved-but-expired session reports `logged_in: false`.
+- `POST /sources/jobright/login/start` opens a **visible** Chromium window on
+  Jobright's login page and returns immediately; the browser stays open
+  (held in a module-level dict) across requests while the user signs in by
+  hand.
+- `POST /sources/jobright/login/finish` (called when the user clicks "I've
+  signed in" in the Fetch tab) saves `context.storage_state()` (cookies) to
+  disk and closes the window - fails with a clear 400 if what got saved
+  doesn't actually pass the live session check (e.g. the user never actually
+  signed in), rather than silently saving a dead session.
+- `POST /sources/jobright/login/cancel` closes the window without saving.
+- `jobright_source.py` loads the saved cookies and attaches them as a plain
+  `Cookie` header on ordinary `requests` calls to the real API - no browser
+  needed for the fetch itself, only for the one-time interactive login.
+  Falls back to the anonymous path automatically when no valid session
+  exists.
+
+Fetch tab UI: when Jobright is selected, shows its live status inline
+(signed in / not signed in, with a Sign-in button) and warns - but doesn't
+block - if you try to fetch without being signed in.
+
+Not yet verified with a real Jobright account (I have none) - the mechanics
+(start/finish/cancel, graceful failure when no real login happens, falling
+back to the anonymous path) are all confirmed working, but the authenticated
+`/swan/recommend/search` response shape is assumed to match the sibling
+project's mapping, not independently confirmed against real logged-in data.
+
+For any other source that turns out to be genuinely account-gated, the same
+pattern applies: one dedicated Playwright profile per source, same
+start/finish/cancel/status shape.
 
 **Open question, not yet decided:** whether to keep scraping LinkedIn at all.
 A comparable local project (a sibling job-capture tool covering much of this
