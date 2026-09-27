@@ -5,6 +5,7 @@ import {
   deleteProfile,
   getProfile,
   listProfiles,
+  pickFolder,
   updateProfile,
   type Profile,
   type ProfileInput,
@@ -12,9 +13,7 @@ import {
 import { Button, Card } from "../components/ui";
 
 const EMPTY_FORM: ProfileInput = {
-  id: "",
   name: "",
-  title: "",
   location: "",
   phone: "",
   email: "",
@@ -30,23 +29,20 @@ function Field({
   value,
   onChange,
   placeholder,
-  disabled,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
-  disabled?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="text-xs text-fg-muted">{label}</span>
       <input
         value={value}
-        disabled={disabled}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-border bg-surface-hover px-2.5 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-50"
+        className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
       />
     </label>
   );
@@ -57,6 +53,7 @@ export function ProfilesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ProfileInput>(EMPTY_FORM);
+  const [pickingFolder, setPickingFolder] = useState(false);
 
   const profilesQuery = useQuery({ queryKey: ["profiles"], queryFn: listProfiles });
 
@@ -84,7 +81,7 @@ export function ProfilesPage() {
   async function startEdit(p: Profile) {
     const detail = await getProfile(p.id);
     setForm({
-      id: detail.id, name: detail.name, title: detail.title, location: detail.location,
+      name: detail.name, location: detail.location,
       phone: detail.phone, email: detail.email, linkedin: detail.linkedin,
       sheet_id: detail.sheet_id, sheet_tab: detail.sheet_tab, output_root: detail.output_root,
       prompt: detail.prompt,
@@ -110,6 +107,16 @@ export function ProfilesPage() {
     else if (editingId) updateMutation.mutate(form);
   }
 
+  async function browseForOutputRoot() {
+    setPickingFolder(true);
+    try {
+      const path = await pickFolder("Select the folder where this profile's applications are saved");
+      if (path) setForm((f) => ({ ...f, output_root: path }));
+    } finally {
+      setPickingFolder(false);
+    }
+  }
+
   const isOpen = creating || editingId !== null;
   const pending = createMutation.isPending || updateMutation.isPending;
   const error = createMutation.error || updateMutation.error;
@@ -129,8 +136,8 @@ export function ProfilesPage() {
             <div key={p.id} className="flex items-center justify-between py-2.5">
               <div>
                 <div className="font-medium">{p.name}</div>
-                <div className="text-xs text-fg-muted">
-                  {p.title || "—"} · Sheet tab: {p.sheet_tab} · {p.output_root}
+                <div className="font-mono text-xs text-fg-muted">
+                  Sheet tab: {p.sheet_tab || "—"} · {p.output_root || "no output folder set"}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -168,29 +175,13 @@ export function ProfilesPage() {
 
       {isOpen && (
         <Card className="p-4">
-          <h3 className="mb-3 text-sm font-semibold">
-            {creating ? "New Profile" : `Edit: ${editingId}`}
-          </h3>
+          <h3 className="mb-3 text-sm font-semibold">{creating ? "New Profile" : `Edit: ${editingId}`}</h3>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Full name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-            <Field
-              label="Slug (id)"
-              value={form.id ?? ""}
-              disabled={!creating}
-              placeholder="auto-generated from name if left blank"
-              onChange={(v) => setForm({ ...form, id: v })}
-            />
-            <Field label="Resume title" value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
             <Field label="Location" value={form.location} onChange={(v) => setForm({ ...form, location: v })} />
             <Field label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
             <Field label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
             <Field label="LinkedIn" value={form.linkedin} onChange={(v) => setForm({ ...form, linkedin: v })} />
-            <Field
-              label="Output root (folder on disk)"
-              value={form.output_root}
-              placeholder="F:/Applications/Firstname"
-              onChange={(v) => setForm({ ...form, output_root: v })}
-            />
             <Field
               label="Google Sheet ID"
               value={form.sheet_id}
@@ -198,6 +189,21 @@ export function ProfilesPage() {
               onChange={(v) => setForm({ ...form, sheet_id: v })}
             />
             <Field label="Sheet tab name" value={form.sheet_tab} onChange={(v) => setForm({ ...form, sheet_tab: v })} />
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs text-fg-muted">Output root (folder on disk)</span>
+              <div className="flex gap-2">
+                <input
+                  value={form.output_root}
+                  readOnly
+                  placeholder="Click Browse to choose a folder"
+                  className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-fg-muted outline-none"
+                />
+                <Button variant="secondary" disabled={pickingFolder} onClick={browseForOutputRoot}>
+                  {pickingFolder ? "Waiting…" : "Browse…"}
+                </Button>
+              </div>
+            </label>
           </div>
 
           <label className="mt-3 flex flex-col gap-1.5">
@@ -206,7 +212,7 @@ export function ProfilesPage() {
               value={form.prompt}
               onChange={(e) => setForm({ ...form, prompt: e.target.value })}
               rows={8}
-              className="rounded-md border border-border bg-surface-hover px-2.5 py-1.5 font-mono text-xs outline-none focus:border-accent"
+              className="rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-xs outline-none focus:border-accent"
             />
           </label>
 
@@ -218,7 +224,11 @@ export function ProfilesPage() {
           )}
 
           <div className="mt-3 flex gap-2">
-            <Button variant="primary" disabled={pending || !form.name || !form.sheet_tab || !form.output_root} onClick={submit}>
+            <Button
+              variant="primary"
+              disabled={pending || !form.name || !form.sheet_tab || !form.output_root}
+              onClick={submit}
+            >
               {pending ? "Saving…" : "Save"}
             </Button>
             <Button variant="ghost" onClick={cancel}>

@@ -18,7 +18,7 @@ from openpyxl import load_workbook
 
 from .. import sheets
 from ..db import get_conn
-from ..models import Opportunity
+from ..models import BulkIds, Opportunity
 from ..profiles import get_profile
 
 router = APIRouter(prefix="/queue", tags=["queue"])
@@ -154,6 +154,37 @@ def retry_opportunity(opp_id: int) -> dict:
         if cur.rowcount == 0:
             raise HTTPException(400, "Opportunity is not in 'failed' state")
     return {"ok": True}
+
+
+@router.post("/bulk-remove")
+def bulk_remove(body: BulkIds) -> dict:
+    if not body.ids:
+        return {"removed": 0}
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT id, staging_dir FROM opportunities WHERE id IN ({','.join('?' * len(body.ids))})",
+            body.ids,
+        ).fetchall()
+        for row in rows:
+            if row["staging_dir"] and Path(row["staging_dir"]).exists():
+                shutil.rmtree(row["staging_dir"], ignore_errors=True)
+        conn.execute(
+            f"DELETE FROM opportunities WHERE id IN ({','.join('?' * len(body.ids))})", body.ids
+        )
+    return {"removed": len(rows)}
+
+
+@router.post("/bulk-retry")
+def bulk_retry(body: BulkIds) -> dict:
+    if not body.ids:
+        return {"retried": 0}
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE opportunities SET status = 'queued', error = NULL, updated_at = datetime('now') "
+            f"WHERE id IN ({','.join('?' * len(body.ids))}) AND status = 'failed'",
+            body.ids,
+        )
+    return {"retried": cur.rowcount}
 
 
 @router.post("/{opp_id}/open-folder")

@@ -1,0 +1,54 @@
+"""RemoteOK adapter - public JSON API, no login, no API key.
+
+Note: plain `curl` on this machine hangs against remoteok.com (a Windows
+schannel TLS-renegotiation quirk, not real bot-blocking) - `requests` (used
+here, via urllib3/OpenSSL) has no such problem and was verified working.
+
+RemoteOK's own terms ask that callers link back to remoteok.com, which this
+project already does (the stored `url` is what "Open Post" opens).
+
+Known gap: RemoteOK's `location` field is inconsistent - often a bare city
+with no state/country ("Redwood City"), sometimes empty (implying worldwide).
+Bare cities with no state/country will fail the US-location gate as a false
+negative until that regex grows a city lookup - worth revisiting once real
+fetch results are being reviewed (see docs/ARCHITECTURE.md gate tuning notes).
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import requests
+from bs4 import BeautifulSoup
+
+from ..models import RawPosting
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+API_URL = "https://remoteok.com/api"
+
+
+def fetch_remoteok(query: str) -> list[RawPosting]:
+    resp = requests.get(API_URL, headers=HEADERS, params={"tags": query.lower()}, timeout=20)
+    resp.raise_for_status()
+    data = resp.json()
+
+    postings: list[RawPosting] = []
+    for job in data:
+        if "position" not in job:
+            continue  # first element is a legal-notice object, not a job
+
+        location = (job.get("location") or "").strip()
+        posted_at: datetime | None = None
+        if job.get("epoch"):
+            posted_at = datetime.fromtimestamp(job["epoch"], tz=timezone.utc)
+
+        postings.append(RawPosting(
+            source="remoteok",
+            external_id=str(job.get("id", job.get("slug", ""))),
+            url=job.get("url", "").replace("remoteOK.com", "remoteok.com"),
+            company=job.get("company", ""),
+            title=job.get("position", ""),
+            location=f"Remote - {location}" if location else "Remote",
+            description=BeautifulSoup(job.get("description", ""), "html.parser").get_text("\n", strip=True),
+            posted_at=posted_at,
+        ))
+    return postings

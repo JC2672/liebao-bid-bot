@@ -5,7 +5,15 @@ Add a new source by adding a module here and registering it in SOURCES below.
 from __future__ import annotations
 
 from ..models import RawPosting
-from . import dice_source, jobspy_source
+from . import (
+    dice_source,
+    jobgether_source,
+    jobright_source,
+    jobspy_source,
+    remoteok_source,
+    remotive_source,
+    weworkremotely_source,
+)
 
 SOURCES: dict[str, callable] = {
     "linkedin": jobspy_source.fetch_linkedin,
@@ -14,15 +22,21 @@ SOURCES: dict[str, callable] = {
     "glassdoor": jobspy_source.fetch_glassdoor,
     "google": jobspy_source.fetch_google,
     "dice": dice_source.fetch_dice,
+    "remotive": remotive_source.fetch_remotive,
+    "remoteok": remoteok_source.fetch_remoteok,
+    "weworkremotely": weworkremotely_source.fetch_weworkremotely,
+    "jobgether": jobgether_source.fetch_jobgether,
+    "jobright": jobright_source.fetch_jobright,
 }
 
-# Investigated and deliberately NOT integrated - see docs/ARCHITECTURE.md
-# "Sources considered and rejected":
-#   - jobright: no public API, requires an account, app/AI-matching platform
-#     with no plain search page to scrape.
-#   - jobgether: Cloudflare-protected (job detail pages return HTTP 403 to
-#     plain requests); would need real browser automation to bypass reliably,
-#     which is a different tier of effort/risk than the other sources here.
+# No source currently needs real login credentials - both Jobright and
+# Jobgether looked account-gated/blocked from web search and a plain curl
+# respectively, but direct inspection (playwright-cli) showed anonymous
+# access works for both once hit the right way. See each module's docstring.
+# If a genuinely login-gated source comes up later, the plan is a Playwright
+# persistent-context profile per source (login once in a visible browser,
+# reuse the saved storage_state for headless fetches) - not built yet since
+# nothing has needed it so far.
 
 
 def fetch_all(source_names: list[str], query: str) -> list[RawPosting]:

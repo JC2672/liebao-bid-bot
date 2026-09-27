@@ -8,30 +8,32 @@ const queryClient = new QueryClient();
 
 type Tab = "fetch" | "queue" | "profiles";
 
+const TABS: [Tab, string][] = [
+  ["fetch", "Fetch"],
+  ["queue", "Queue"],
+  ["profiles", "Profiles"],
+];
+
 function App() {
   const [tab, setTab] = useState<Tab>("fetch");
 
   return (
     <QueryClientProvider client={queryClient}>
       <div className="min-h-screen bg-bg text-fg">
-        <header className="border-b border-border px-6 py-4">
-          <div className="mx-auto flex max-w-6xl items-center gap-6">
-            <h1 className="text-base font-semibold">liebao-bid-bot</h1>
-            <nav className="flex gap-1">
-              {(
-                [
-                  ["fetch", "Fetch"],
-                  ["queue", "Queue"],
-                  ["profiles", "Profiles"],
-                ] as [Tab, string][]
-              ).map(([id, label]) => (
+        <header className="border-b border-border bg-surface">
+          <div className="mx-auto flex max-w-7xl items-center gap-8 px-6">
+            <span className="py-4 font-mono text-sm font-medium tracking-tight text-fg">
+              liebao-bid-bot
+            </span>
+            <nav className="flex h-full gap-6">
+              {TABS.map(([id, label]) => (
                 <button
                   key={id}
                   onClick={() => setTab(id)}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                  className={`border-b-2 py-4 text-sm font-medium transition-colors ${
                     tab === id
-                      ? "bg-accent/10 text-accent"
-                      : "text-fg-muted hover:text-fg"
+                      ? "border-accent text-fg"
+                      : "border-transparent text-fg-muted hover:text-fg"
                   }`}
                 >
                   {label}
@@ -41,7 +43,7 @@ function App() {
           </div>
         </header>
 
-        <main className="mx-auto max-w-6xl px-6 py-6">
+        <main className="mx-auto max-w-7xl px-6 py-6">
           {tab === "fetch" && <FetchPage />}
           {tab === "queue" && <QueuePage />}
           {tab === "profiles" && <ProfilesPage />}

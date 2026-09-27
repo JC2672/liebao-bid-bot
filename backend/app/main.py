@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from typing import Annotated
+
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
+from .native import pick_folder
 from .routers import fetch, profiles, queue
 
 app = FastAPI(title="liebao-bid-bot")
@@ -30,3 +33,10 @@ def _startup() -> None:
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@app.post("/pick-folder")
+def pick_folder_endpoint(description: Annotated[str, Query()] = "Select a folder") -> dict:
+    """Opens a native Windows folder-picker dialog and returns the chosen
+    path - browsers can't hand back a real filesystem path themselves."""
+    return {"path": pick_folder(description)}

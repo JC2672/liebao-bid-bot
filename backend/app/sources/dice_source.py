@@ -13,35 +13,16 @@ source, which is enough for the Salesforce/US-Remote hard gates.
 """
 from __future__ import annotations
 
-import re
-from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import requests
 from bs4 import BeautifulSoup
 
 from ..models import RawPosting
+from ._dates import parse_relative_date
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 MAX_PAGES = 5
-PAGE_SIZE_GUARD = 0  # stop early if a page returns no cards
-
-
-def _parse_relative_date(text: str) -> datetime | None:
-    """'Today', 'Yesterday', 'X days ago', 'X hours ago' -> UTC datetime."""
-    text = text.strip().lower()
-    now = datetime.now(timezone.utc)
-    if text == "today":
-        return now
-    if text == "yesterday":
-        return now - timedelta(days=1)
-    m = re.match(r"(\d+)\s*(hour|day|week|month)s?\s*ago", text)
-    if not m:
-        return None
-    n, unit = int(m.group(1)), m.group(2)
-    delta = {"hour": timedelta(hours=n), "day": timedelta(days=n),
-             "week": timedelta(weeks=n), "month": timedelta(days=n * 30)}[unit]
-    return now - delta
 
 
 def fetch_dice(query: str) -> list[RawPosting]:
@@ -81,6 +62,6 @@ def fetch_dice(query: str) -> list[RawPosting]:
                 title=link.get("aria-label") or link.get_text(strip=True),
                 location=location,
                 description="",
-                posted_at=_parse_relative_date(posted_text) if posted_text else None,
+                posted_at=parse_relative_date(posted_text) if posted_text else None,
             ))
     return postings

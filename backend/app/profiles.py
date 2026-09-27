@@ -89,7 +89,7 @@ def create_profile(data: ProfileInput) -> Profile:
         raise FileExistsError(f"Profile '{profile_id}' already exists")
 
     profile = Profile(
-        id=profile_id, name=data.name, title=data.title, location=data.location,
+        id=profile_id, name=data.name, location=data.location,
         phone=data.phone, email=data.email, linkedin=data.linkedin,
         sheet_id=data.sheet_id, sheet_tab=data.sheet_tab, output_root=data.output_root,
     )
@@ -102,7 +102,7 @@ def update_profile(profile_id: str, data: ProfileInput) -> Profile:
         raise FileNotFoundError(f"No profile '{profile_id}'")
     existing = get_profile(profile_id)  # keeps `template` filename stable
     updated = Profile(
-        id=profile_id, name=data.name, title=data.title, location=data.location,
+        id=profile_id, name=data.name, location=data.location,
         phone=data.phone, email=data.email, linkedin=data.linkedin,
         sheet_id=data.sheet_id, sheet_tab=data.sheet_tab, output_root=data.output_root,
         template=existing.template,

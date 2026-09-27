@@ -72,6 +72,10 @@ class Opportunity(BaseModel):
     updated_at: datetime | None = None
 
 
+class BulkIds(BaseModel):
+    ids: list[int]
+
+
 class ImportRequest(BaseModel):
     profile: str
     # Rows come from the uploaded XLSX/CSV; parsed server-side into RawPosting-shaped dicts.
@@ -80,7 +84,6 @@ class ImportRequest(BaseModel):
 class Profile(BaseModel):
     id: str  # slug, matches the profiles/<id>/ directory name
     name: str  # display name, printed on the resume
-    title: str = ""
     location: str = ""
     phone: str = ""
     email: str = ""
@@ -104,7 +107,6 @@ class ProfileInput(BaseModel):
 
     id: str = ""
     name: str
-    title: str = ""
     location: str = ""
     phone: str = ""
     email: str = ""

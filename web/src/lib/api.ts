@@ -28,7 +28,6 @@ export interface FetchCounts {
 export interface Profile {
   id: string;
   name: string;
-  title: string;
   location: string;
   phone: string;
   email: string;
@@ -44,9 +43,7 @@ export interface ProfileDetail extends Profile {
 }
 
 export interface ProfileInput {
-  id?: string;
   name: string;
-  title: string;
   location: string;
   phone: string;
   email: string;
@@ -83,6 +80,11 @@ export const SOURCE_OPTIONS = [
   { id: "glassdoor", label: "Glassdoor" },
   { id: "google", label: "Google Jobs" },
   { id: "dice", label: "Dice" },
+  { id: "remotive", label: "Remotive" },
+  { id: "remoteok", label: "RemoteOK" },
+  { id: "weworkremotely", label: "We Work Remotely" },
+  { id: "jobgether", label: "Jobgether" },
+  { id: "jobright", label: "Jobright" },
 ];
 
 export async function runFetch(sources: string[], query: string, postedWithinDays: number) {
@@ -132,6 +134,13 @@ export async function deleteProfile(id: string) {
   await api.delete(`/profiles/${id}`);
 }
 
+export async function pickFolder(description: string) {
+  const { data } = await api.post<{ path: string | null }>("/pick-folder", null, {
+    params: { description },
+  });
+  return data.path;
+}
+
 export async function listQueue(profile: string) {
   const { data } = await api.get<Opportunity[]>("/queue", { params: { profile } });
   return data;
@@ -159,6 +168,14 @@ export async function removeOpportunity(id: number) {
 
 export async function retryOpportunity(id: number) {
   await api.post(`/queue/${id}/retry`);
+}
+
+export async function bulkRemove(ids: number[]) {
+  await api.post("/queue/bulk-remove", { ids });
+}
+
+export async function bulkRetry(ids: number[]) {
+  await api.post("/queue/bulk-retry", { ids });
 }
 
 export async function openFolder(id: number) {

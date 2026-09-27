@@ -82,7 +82,6 @@ about the rest of the system (generation, staging, Output Root) has to change:
 {
   "id": "firstname-lastname",
   "name": "Firstname Lastname",
-  "title": "",
   "location": "",
   "phone": "",
   "email": "",
@@ -98,6 +97,13 @@ Plus `prompt.md` (the tailoring prompt, JD gets appended) and `template.html`
 `profiles/_default_template.html` on creation, then can be customized
 per-profile). Deleting a profile is blocked while it still has opportunities
 in the SQLite queue, to avoid silently orphaning in-flight work.
+
+Deliberately no `title` field here: a resume's headline title varies per JD
+and is already generated per-opportunity (see the resume JSON schema below),
+so a fixed per-profile one would just be redundant/stale. `output_root` is
+never hand-typed either - the Profiles screen's "Browse…" button opens a
+native OS folder picker (`POST /pick-folder`) and fills in the real path,
+since a browser's own picker can't hand back an absolute filesystem path.
 
 ### Resume JSON schema (LLM output contract)
 
@@ -136,27 +142,28 @@ falling back to Company+Title).
 
 ## Fetch: sources & gates
 
-**Sources** (each behind one `fetch(query) -> RawPosting[]` adapter):
-- Tier A — public ATS APIs: Greenhouse, Lever, Ashby (ToS-friendly, most accurate)
-- Tier B — aggregators via [JobSpy](https://github.com/speedyapply/JobSpy):
-  LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google Jobs
-- Tier C — **Dice**: its own job-search API was shut down years ago, so this
-  scrapes the public, login-free search results page directly (server-rendered
-  HTML, no JS needed). Card-level only (title/company/location); full JD text
-  is not fetched per listing to keep request volume low.
-- Tier D (later) — RemoteOK, Remotive, Adzuna
+**Sources** (each behind one `fetch(query) -> RawPosting[]` adapter). None of
+the ten need login or an API key - see each module's docstring for how it was
+verified, since first impressions from web search alone were wrong twice
+(Jobright and Jobgether both looked account-gated/blocked until inspected
+directly with a real browser):
 
-**Sources considered and rejected:**
-- **Jobright** — no public API; it's an account-gated AI job-matching app with
-  no plain search page to scrape. Third-party paid scrapers (Apify) exist but
-  weren't used.
-- **Jobgether** — Cloudflare-protected; job *detail* pages return HTTP 403 to
-  plain requests (the listing page loaded once, but its filtering doesn't
-  reliably apply and can't be trusted for gating). Reaching it would need real
-  browser automation to get past Cloudflare's challenge, which is a materially
-  different tier of effort/fragility than the other sources here. Worth
-  revisiting if/when the project has a browser-automation layer running
-  anyway (Phase 3's ChatGPT-web worker).
+| Source | How | Notes |
+|---|---|---|
+| LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google Jobs | [JobSpy](https://github.com/speedyapply/JobSpy) | unofficial, rate-limit-sensitive |
+| Dice | HTML scrape, plain `requests` | own API shut down years ago; card-level only, no per-listing JD fetch |
+| Remotive | public JSON API | keeps to its own asked rate limit (fetch is on-demand only, never polled) |
+| RemoteOK | public JSON API, plain `requests` | `curl` on Windows hangs against this host (schannel TLS quirk) - `requests`/urllib3 has no such issue |
+| We Work Remotely | public RSS (combined "all jobs" feed, no keyword param) | |
+| Jobright | plain `requests`, reads the page's embedded `__NEXT_DATA__` JSON | richest data of any source (salary, H1B signal, seniority, remote/hybrid); only page 1 (~20 results) is reachable, `&page=` doesn't paginate the SSR payload |
+| Jobgether | **Playwright** (headless Chromium), DOM read | plain requests get HTTP 403 from Cloudflare on this one specifically; a real browser gets through with no login involved |
+
+**Login-gated sources:** none needed one so far. If a genuinely account-gated
+source comes up later, the plan is a Playwright **persistent-context**
+profile per source: a "Sign in" action opens a real, visible browser window
+for the user to log in once, the resulting `storage_state` (cookies) is saved
+to disk, and later headless fetches reuse it. Not built, because nothing has
+required it yet.
 
 **Hard gates** (reject, with a stored reason shown in the UI):
 - Salesforce relevance (keyword allow-list + negative list, to exclude

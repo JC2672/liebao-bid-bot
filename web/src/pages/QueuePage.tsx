@@ -1,6 +1,8 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  bulkRemove,
+  bulkRetry,
   importShortlist,
   listProfiles,
   listQueue,
@@ -9,11 +11,12 @@ import {
   removeOpportunity,
   retryOpportunity,
 } from "../lib/api";
-import { Button, Card, StatusBadge } from "../components/ui";
+import { Button, Card, Checkbox, StatusBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
 export function QueuePage() {
   const queryClient = useQueryClient();
   const [profile, setProfile] = useState<string>("");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const fileInput = useRef<HTMLInputElement>(null);
 
   const profilesQuery = useQuery({ queryKey: ["profiles"], queryFn: listProfiles });
@@ -25,24 +28,49 @@ export function QueuePage() {
     enabled: !!activeProfile,
     refetchInterval: 5000, // picks up status changes once the generation engine (Phase 3) runs
   });
+  const rows = queueQuery.data ?? [];
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["queue", activeProfile] });
 
   const importMutation = useMutation({
     mutationFn: (file: File) => importShortlist(activeProfile, file),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["queue", activeProfile] }),
+    onSuccess: invalidate,
+  });
+  const appliedMutation = useMutation({ mutationFn: markApplied, onSuccess: invalidate });
+  const removeMutation = useMutation({ mutationFn: removeOpportunity, onSuccess: invalidate });
+  const retryMutation = useMutation({ mutationFn: retryOpportunity, onSuccess: invalidate });
+  const bulkRemoveMutation = useMutation({
+    mutationFn: bulkRemove,
+    onSuccess: () => {
+      setSelected(new Set());
+      invalidate();
+    },
+  });
+  const bulkRetryMutation = useMutation({
+    mutationFn: bulkRetry,
+    onSuccess: () => {
+      setSelected(new Set());
+      invalidate();
+    },
   });
 
-  const appliedMutation = useMutation({
-    mutationFn: markApplied,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["queue", activeProfile] }),
-  });
-  const removeMutation = useMutation({
-    mutationFn: removeOpportunity,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["queue", activeProfile] }),
-  });
-  const retryMutation = useMutation({
-    mutationFn: retryOpportunity,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["queue", activeProfile] }),
-  });
+  const allSelected = rows.length > 0 && selected.size === rows.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const selectedFailedCount = useMemo(
+    () => rows.filter((r) => selected.has(r.id) && r.status === "failed").length,
+    [rows, selected],
+  );
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)));
+  }
+  function toggleOne(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -51,8 +79,11 @@ export function QueuePage() {
           <label className="text-xs text-fg-muted">Profile</label>
           <select
             value={activeProfile}
-            onChange={(e) => setProfile(e.target.value)}
-            className="w-56 rounded-md border border-border bg-surface-hover px-2.5 py-1.5 text-sm outline-none focus:border-accent"
+            onChange={(e) => {
+              setProfile(e.target.value);
+              setSelected(new Set());
+            }}
+            className="w-56 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
           >
             {profilesQuery.data?.map((p) => (
               <option key={p.id} value={p.id}>
@@ -89,71 +120,100 @@ export function QueuePage() {
         )}
       </Card>
 
+      {selected.size > 0 && (
+        <Card className="flex items-center gap-3 border-accent/40 bg-accent-wash p-3">
+          <span className="text-sm font-medium text-accent">{selected.size} selected</span>
+          <Button
+            variant="secondary"
+            disabled={selectedFailedCount === 0 || bulkRetryMutation.isPending}
+            onClick={() => bulkRetryMutation.mutate([...selected])}
+          >
+            Retry {selectedFailedCount > 0 ? `(${selectedFailedCount} failed)` : ""}
+          </Button>
+          <Button
+            variant="danger"
+            disabled={bulkRemoveMutation.isPending}
+            onClick={() => bulkRemoveMutation.mutate([...selected])}
+          >
+            Remove selected
+          </Button>
+          <Button variant="ghost" onClick={() => setSelected(new Set())}>
+            Clear selection
+          </Button>
+        </Card>
+      )}
+
       <Card className="p-4">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs text-fg-muted">
-              <tr className="border-b border-border">
-                <th className="py-2 pr-3">Company</th>
-                <th className="py-2 pr-3">Title</th>
-                <th className="py-2 pr-3">Location</th>
-                <th className="py-2 pr-3">Status</th>
-                <th className="py-2 pr-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {queueQuery.data?.map((o) => (
-                <tr key={o.id} className="border-b border-border/50">
-                  <td className="py-2 pr-3 font-medium">{o.company}</td>
-                  <td className="py-2 pr-3">{o.title}</td>
-                  <td className="py-2 pr-3 text-fg-muted">{o.location}</td>
-                  <td className="py-2 pr-3">
-                    <StatusBadge status={o.status} />
-                    {o.status === "failed" && o.error && (
-                      <span className="ml-2 text-xs text-bad">{o.error}</span>
+        <Table>
+          <THead>
+            <Tr>
+              <Th className="w-8">
+                <Checkbox
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected;
+                  }}
+                  onChange={toggleAll}
+                />
+              </Th>
+              <Th>Company</Th>
+              <Th>Title</Th>
+              <Th>Location</Th>
+              <Th>Status</Th>
+              <Th>Actions</Th>
+            </Tr>
+          </THead>
+          <TBody>
+            {rows.map((o) => (
+              <Tr key={o.id} className={selected.has(o.id) ? "bg-accent-wash" : ""}>
+                <Td>
+                  <Checkbox checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} />
+                </Td>
+                <Td className="font-medium">{o.company}</Td>
+                <Td>{o.title}</Td>
+                <Td className="text-fg-muted">{o.location}</Td>
+                <Td>
+                  <StatusBadge status={o.status} />
+                  {o.status === "failed" && o.error && (
+                    <span className="ml-2 text-xs text-bad">{o.error}</span>
+                  )}
+                </Td>
+                <Td>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="ghost" onClick={() => window.open(o.url, "_blank")}>
+                      Open Post
+                    </Button>
+                    <Button variant="ghost" disabled={!o.staging_dir} onClick={() => openFolder(o.id)}>
+                      Open Folder
+                    </Button>
+                    {o.status === "failed" && (
+                      <Button variant="secondary" onClick={() => retryMutation.mutate(o.id)}>
+                        Retry
+                      </Button>
                     )}
-                  </td>
-                  <td className="py-2 pr-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="ghost" onClick={() => window.open(o.url, "_blank")}>
-                        Open Post
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={!o.staging_dir}
-                        onClick={() => openFolder(o.id)}
-                      >
-                        Open Folder
-                      </Button>
-                      {o.status === "failed" && (
-                        <Button variant="secondary" onClick={() => retryMutation.mutate(o.id)}>
-                          Retry
-                        </Button>
-                      )}
-                      <Button
-                        variant="primary"
-                        disabled={o.status !== "ready" || appliedMutation.isPending}
-                        onClick={() => appliedMutation.mutate(o.id)}
-                      >
-                        Applied
-                      </Button>
-                      <Button variant="danger" onClick={() => removeMutation.mutate(o.id)}>
-                        Remove
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {queueQuery.data?.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-fg-muted">
-                    Queue is empty for this profile. Import a shortlist to get started.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                    <Button
+                      variant="primary"
+                      disabled={o.status !== "ready" || appliedMutation.isPending}
+                      onClick={() => appliedMutation.mutate(o.id)}
+                    >
+                      Applied
+                    </Button>
+                    <Button variant="danger" onClick={() => removeMutation.mutate(o.id)}>
+                      Remove
+                    </Button>
+                  </div>
+                </Td>
+              </Tr>
+            ))}
+            {rows.length === 0 && (
+              <Tr>
+                <Td colSpan={6} className="py-8 text-center text-fg-muted">
+                  Queue is empty for this profile. Import a shortlist to get started.
+                </Td>
+              </Tr>
+            )}
+          </TBody>
+        </Table>
       </Card>
     </div>
   );

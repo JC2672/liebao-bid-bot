@@ -2,6 +2,7 @@
 backend/.venv/
 backend/**/__pycache__/
 *.pyc
+backend/*.egg-info/
 
 # Node
 web/node_modules/
@@ -23,3 +24,7 @@ data/
 # Editor/OS
 .DS_Store
 Thumbs.db
+
+# playwright-cli scratch output (snapshots, screenshots) from manual testing
+.playwright-cli/
+*.playwright-cli/

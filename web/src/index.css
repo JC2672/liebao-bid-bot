@@ -1,20 +1,77 @@
 @import "tailwindcss";
 
-@theme {
-  --color-bg: #0b0e14;
-  --color-surface: #131722;
-  --color-surface-hover: #1a1f2e;
-  --color-border: #232838;
-  --color-fg: #e6e8ee;
-  --color-fg-muted: #8a90a3;
-  --color-accent: #4f8cff;
-  --color-accent-fg: #ffffff;
-  --color-good: #35c97f;
-  --color-warn: #e0a52c;
-  --color-bad: #e0544c;
+/*
+  Design plan (see frontend-design skill):
+
+  Subject: a job-application operations tool - a working ledger you scan
+  fast and act on repeatedly (fetch → shortlist → generate → apply). Not a
+  marketing surface, so the brief calls for a light, precise, spreadsheet-
+  adjacent register rather than a moody dark dashboard - the opposite of the
+  near-black + single-bright-accent pattern this project actually started
+  with and is now deliberately correcting.
+
+  Color: warm-neutral paper background (#F7F6F3, cooler than the flagged
+  cream #F4F1EA), near-black warm ink for text, a deep forest-teal accent
+  (#2B6355) standing in for "in progress / go", ochre for caution and brick
+  for rejection - all desaturated enough to sit calmly on white, none of them
+  the generic SaaS blue or Claude's own terracotta.
+
+  Type: the platform sans (Segoe UI on Windows, where this always runs) for
+  UI text, a real monospace stack for anything that is literally data -
+  counts, dates, status words, badges - so the eye can tell "label" from
+  "value" without extra chrome. No webfont dependency: this app has already
+  hit one real-world case of a VPN silently breaking network access other
+  code assumed would work (see start.bat's 127.0.0.1 fix) - a font CDN is
+  exactly that risk again, confirmed here directly (fonts.gstatic.com timed
+  out in this sandbox), so this sticks to what the OS already has.
+
+  Layout: left-aligned, dense, bordered tables with a real header row and
+  row-level selection; no card-soup, no matching border-radius+shadow on
+  every box.
+*/
+
+:root {
+  --color-bg: #f7f6f3;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f0eee8;
+  --color-border: #dedad2;
+  --color-fg: #211f1c;
+  --color-fg-muted: #756f64;
+  --color-accent: #2b6355;
+  --color-accent-hover: #234f44;
+  --color-accent-fg: #f5f3ee;
+  --color-accent-wash: #e7efec;
+  --color-good: #2b6355;
+  --color-good-wash: #e7efec;
+  --color-warn: #8a5a10;
+  --color-warn-wash: #f5ecd9;
+  --color-bad: #96392a;
+  --color-bad-wash: #f6e8e5;
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-hover: var(--color-surface-hover);
+  --color-border: var(--color-border);
+  --color-fg: var(--color-fg);
+  --color-fg-muted: var(--color-fg-muted);
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-fg: var(--color-accent-fg);
+  --color-accent-wash: var(--color-accent-wash);
+  --color-good: var(--color-good);
+  --color-good-wash: var(--color-good-wash);
+  --color-warn: var(--color-warn);
+  --color-warn-wash: var(--color-warn-wash);
+  --color-bad: var(--color-bad);
+  --color-bad-wash: var(--color-bad-wash);
+  --font-sans: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
 }
 
 body {
   background: var(--color-bg);
   color: var(--color-fg);
+  font-family: var(--font-sans);
 }
