@@ -26,10 +26,31 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 API_URL = "https://remoteok.com/api"
 
 
-def fetch_remoteok(query: str) -> list[RawPosting]:
-    resp = requests.get(API_URL, headers=HEADERS, params={"tags": query.lower()}, timeout=20)
+def _request(tag: str) -> list[dict]:
+    params = {"tags": tag} if tag else {}
+    resp = requests.get(API_URL, headers=HEADERS, params=params, timeout=20)
     resp.raise_for_status()
-    data = resp.json()
+    return resp.json()
+
+
+def _matches_query(job: dict, words: list[str]) -> bool:
+    text = f"{job.get('position', '')} {job.get('company', '')} {job.get('description', '')}".lower()
+    return any(w in text for w in words)
+
+
+def fetch_remoteok(query: str) -> list[RawPosting]:
+    # RemoteOK's `tags` param is an exact match against its own single-word
+    # tag vocabulary (e.g. "salesforce"), not a free-text search - a phrase
+    # like "Salesforce Administrator" matches no tag at all and silently
+    # returns zero results. Try the first word as a tag (the common case:
+    # "Salesforce", "Salesforce Developer", etc. all start with a real tag);
+    # if that comes back empty, fall back to the site's general/latest feed
+    # and filter it locally by whether any query word appears in the
+    # title/company/description.
+    words = [w for w in query.strip().lower().split() if w]
+    data = _request(words[0]) if words else _request("")
+    if len(data) <= 1 and words:  # only the legal-notice object came back
+        data = [job for job in _request("") if _matches_query(job, words)]
 
     postings: list[RawPosting] = []
     for job in data:
