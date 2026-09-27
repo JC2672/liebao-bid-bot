@@ -10,7 +10,9 @@ app = FastAPI(title="liebao-bid-bot")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    # Both hostnames are allowed since some VPN clients override DNS such that
+    # "localhost" no longer resolves to loopback - see start.bat.
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

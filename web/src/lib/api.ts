@@ -1,6 +1,8 @@
 import axios from "axios";
 
-export const api = axios.create({ baseURL: "http://localhost:8000" });
+// 127.0.0.1, not "localhost" - some VPN clients override DNS so "localhost"
+// no longer resolves to loopback. See start.bat and main.py's CORS config.
+export const api = axios.create({ baseURL: "http://127.0.0.1:8000" });
 
 export interface GateResult {
   source: string;
