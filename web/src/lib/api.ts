@@ -92,6 +92,7 @@ export const SOURCE_OPTIONS = [
   { id: "greenhouse", label: "Greenhouse", domain: "greenhouse.io" },
   { id: "lever", label: "Lever", domain: "lever.co" },
   { id: "ashby", label: "Ashby", domain: "ashbyhq.com" },
+  { id: "talent", label: "Talent.com", domain: "talent.com" },
 ];
 
 // Google's favicon service, keyed by domain - gets every source's real logo

@@ -16,6 +16,7 @@ from . import (
     jobspy_source,
     remoteok_source,
     remotive_source,
+    talent_source,
     weworkremotely_source,
     workingnomads_source,
 )
@@ -39,6 +40,7 @@ SOURCES: dict[str, callable] = {
     "greenhouse": ats_boards_source.fetch_greenhouse,
     "lever": ats_boards_source.fetch_lever,
     "ashby": ats_boards_source.fetch_ashby,
+    "talent": talent_source.fetch_talent,
 }
 
 # The Muse: investigated and NOT integrated. Its public API has no free-text
@@ -46,6 +48,13 @@ SOURCES: dict[str, callable] = {
 # it's 400k+ jobs total, so scanning enough pages to find relevant postings
 # by chance isn't practical the way it is for We Work Remotely/Arbeitnow/
 # Working Nomads (each only tens-to-low-hundreds of postings total).
+
+# Obra: investigated directly and NOT integrated - and not revisitable
+# without real credentials. Its web app is gated behind Firebase App Check,
+# a purpose-built anti-automation service (distinct from incidental
+# Cloudflare bot-protection seen elsewhere): a single real-browser visit hit
+# a 403 that self-throttles further attempts for 24 hours. This is a
+# deliberate anti-scraping measure, not a fetchable source.
 
 # No source currently needs real login credentials - both Jobright and
 # Jobgether looked account-gated/blocked from web search and a plain curl

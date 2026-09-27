@@ -40,11 +40,11 @@ def _row_to_posting(source: str, row: pd.Series) -> RawPosting:
     )
 
 
-def _scrape(site_name: str, query: str) -> list[RawPosting]:
+def _scrape(site_name: str, query: str, location: str = DEFAULT_LOCATION) -> list[RawPosting]:
     df = scrape_jobs(
         site_name=[site_name],
         search_term=query,
-        location=DEFAULT_LOCATION,
+        location=location,
         results_wanted=DEFAULT_RESULTS,
         country_indeed="USA",
     )
@@ -54,6 +54,27 @@ def _scrape(site_name: str, query: str) -> list[RawPosting]:
 
 
 def fetch_linkedin(query: str) -> list[RawPosting]:
+    # "Remote only" was asked for, but neither achievable lever actually
+    # narrows to *US* remote, so this stays on location="United States"
+    # rather than trade US onsite/hybrid noise for worldwide noise:
+    #
+    # - jobspy's `is_remote=True` sends LinkedIn's real f_WT=2 filter code,
+    #   but was verified live to have NO effect - an identical top-15 result
+    #   set came back with and without it (checked both via the raw HTTP
+    #   response and jobspy's own parser). LinkedIn's guest/anonymous search
+    #   endpoint appears to simply not honor that filter anymore.
+    # - location="Remote" *does* genuinely change the result set (confirmed:
+    #   real remote-tagged postings), but it's worldwide-remote, not
+    #   US-remote - most of what it returns is Poland/India/Vietnam/etc.
+    #   roles that gates.py's US-location gate then throws away, which is a
+    #   worse trade than location="United States" (every result at least
+    #   US-based, even if not every one is remote).
+    #
+    # "Exclude Easy Apply" is not achievable at all right now: LinkedIn's own
+    # search only offers an "Easy Apply ONLY" filter (f_AL=true), no exclude
+    # option, and jobspy's LinkedIn scraper never populates an `easy_apply`
+    # field on scraped results either - there's nothing to filter on
+    # after the fact.
     return _scrape("linkedin", query)
 
 

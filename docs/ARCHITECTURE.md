@@ -156,7 +156,8 @@ before being added, not assumed from a doc or another project's config:
 
 | Source | How | Notes |
 |---|---|---|
-| LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google Jobs | [JobSpy](https://github.com/speedyapply/JobSpy) | unofficial, rate-limit-sensitive |
+| LinkedIn | [JobSpy](https://github.com/speedyapply/JobSpy), `location="United States"` | "remote only" was asked for, but neither achievable lever actually narrows to *US* remote: JobSpy's `is_remote=True` flag sends LinkedIn's real `f_WT=2` filter param, but was verified live to have **zero effect** (identical top-15 results with and without it, checked via both the raw HTTP response and JobSpy's own parser) - LinkedIn's guest/anonymous endpoint appears to just not honor it anymore. `location="Remote"` *does* genuinely change the result set, but worldwide rather than US-specific (mostly Poland/India/Vietnam-type postings the US-location gate then discards) - a worse trade than `location="United States"`, where every result is at least US-based even if not every one is remote. "Exclude Easy Apply" is **not achievable at all**: LinkedIn's own search only offers an "Easy Apply ONLY" filter, no exclude option, and JobSpy's LinkedIn scraper never even records whether a posting is Easy Apply |
+| Indeed, Glassdoor, ZipRecruiter, Google Jobs | [JobSpy](https://github.com/speedyapply/JobSpy) | unofficial, rate-limit-sensitive |
 | Dice | HTML scrape, plain `requests` | own API shut down years ago; card-level only, no per-listing JD fetch |
 | Remotive | public JSON API | keeps to its own asked rate limit (fetch is on-demand only, never polled) |
 | RemoteOK | public JSON API, plain `requests` | `curl` on Windows hangs against this host (schannel TLS quirk) - `requests`/urllib3 has no such issue. `tags` is an exact single-word match, not free text - first word of the query is used as the tag, falling back to a client-side filter over the general feed if that tag doesn't exist |
@@ -168,17 +169,17 @@ before being added, not assumed from a doc or another project's config:
 | Arbeitnow | public JSON API, plain `requests` | no server-side search despite accepting `search`/`tags`/`q` params (all silently return the same unfiltered list, verified) - browse-only, filtered client-side |
 | Working Nomads | public JSON API, plain `requests` | same as Arbeitnow: no working filter param, small feed, filtered client-side |
 | Greenhouse, Lever, Ashby | direct per-company public JSON APIs, plain `requests`, fanned out concurrently | no cross-company search - each is one call per company's own board. `query` is unused (like We Work Remotely); gates.py's relevance filter does the real work over every job each company in the list has open. Company list lives in `ats_boards_source.py`, each token verified live before being added - re-verify before trusting an old copy of this list, since companies migrate ATS providers over time (this project's own first draft of the list, borrowed from elsewhere, was already a third stale) |
+| Talent.com | **Playwright** (headless Chromium), DOM read | no official free API (only paid third-party scrapers exist); the search page loads fine (no Cloudflare block) but its visible job cards come from a client-side Next.js RSC request, not the initial HTML (which only has a bare SEO link list) - not a stable JSON API worth reverse-engineering, so this reads the rendered DOM like Jobgether. Pagination is a JS button, not a URL param, so only the first page (~20-30 results) is reachable |
 
 **Investigated and not integrated:** The Muse - its public API has no
 free-text search and no category matching Salesforce/CRM, and is 400k+ jobs
 total, so scanning enough pages to find relevant postings isn't practical the
 way it is for the other browse-and-filter sources above (each of those is
-only tens-to-low-hundreds of postings total). Obra looks like an account-
-gated, swipe-based consumer app whose API is for employers posting jobs in,
-not for searching jobs out - not re-verified directly, so revisit if there's
-reason to think otherwise. Talent.com has no free official API (only paid
-third-party scrapers found) - unlike Jobright/Jobgether, not yet checked
-directly for whether it's scrapable anyway.
+only tens-to-low-hundreds of postings total). Obra - its web app is gated
+behind **Firebase App Check**, a purpose-built anti-automation service
+(distinct from incidental Cloudflare bot-protection): a single real-browser
+visit hit a 403 that self-throttled further attempts for 24 hours. That's a
+deliberate anti-scraping measure, not something worth working around.
 
 **Login-gated sources:** none needed one so far. If a genuinely account-gated
 source comes up later, the plan is a Playwright **persistent-context**
