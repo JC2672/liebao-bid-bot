@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import {
   exportShortlist,
   runFetch,
+  sourceIconUrl,
   SOURCE_OPTIONS,
   type FetchCounts,
   type GateResult,
@@ -68,12 +69,20 @@ export function FetchPage() {
                 <button
                   key={s.id}
                   onClick={() => toggleSource(s.id)}
-                  className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm transition-colors ${
                     sources.includes(s.id)
                       ? "border-accent bg-accent-wash text-accent"
                       : "border-border text-fg-muted hover:text-fg"
                   }`}
                 >
+                  <img
+                    src={sourceIconUrl(s.domain)}
+                    alt=""
+                    className="h-4 w-4 shrink-0"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
                   {s.label}
                 </button>
               ))}

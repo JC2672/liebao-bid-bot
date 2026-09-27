@@ -74,18 +74,26 @@ export interface Opportunity {
 }
 
 export const SOURCE_OPTIONS = [
-  { id: "linkedin", label: "LinkedIn" },
-  { id: "indeed", label: "Indeed" },
-  { id: "zip_recruiter", label: "ZipRecruiter" },
-  { id: "glassdoor", label: "Glassdoor" },
-  { id: "google", label: "Google Jobs" },
-  { id: "dice", label: "Dice" },
-  { id: "remotive", label: "Remotive" },
-  { id: "remoteok", label: "RemoteOK" },
-  { id: "weworkremotely", label: "We Work Remotely" },
-  { id: "jobgether", label: "Jobgether" },
-  { id: "jobright", label: "Jobright" },
+  { id: "linkedin", label: "LinkedIn", domain: "linkedin.com" },
+  { id: "indeed", label: "Indeed", domain: "indeed.com" },
+  { id: "zip_recruiter", label: "ZipRecruiter", domain: "ziprecruiter.com" },
+  { id: "glassdoor", label: "Glassdoor", domain: "glassdoor.com" },
+  { id: "google", label: "Google Jobs", domain: "google.com" },
+  { id: "dice", label: "Dice", domain: "dice.com" },
+  { id: "remotive", label: "Remotive", domain: "remotive.com" },
+  { id: "remoteok", label: "RemoteOK", domain: "remoteok.com" },
+  { id: "weworkremotely", label: "We Work Remotely", domain: "weworkremotely.com" },
+  { id: "jobgether", label: "Jobgether", domain: "jobgether.com" },
+  { id: "jobright", label: "Jobright", domain: "jobright.ai" },
 ];
+
+// Google's favicon service, keyed by domain - gets every source's real logo
+// without needing a brand-icon library that wouldn't cover the smaller job
+// boards (Dice, Jobgether, Jobright, RemoteOK, Remotive, We Work Remotely
+// aren't in most icon packs; this covers all eleven uniformly).
+export function sourceIconUrl(domain: string) {
+  return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+}
 
 export async function runFetch(sources: string[], query: string, postedWithinDays: number) {
   const { data } = await api.post<{ results: GateResult[]; counts: FetchCounts }>("/fetch", {

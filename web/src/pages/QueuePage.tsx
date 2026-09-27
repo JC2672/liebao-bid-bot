@@ -19,12 +19,14 @@ function IconButton({
   onClick,
   disabled,
   tone = "default",
+  badge,
   children,
 }: {
   title: string;
   onClick: () => void;
   disabled?: boolean;
   tone?: "default" | "danger" | "primary";
+  badge?: number;
   children: React.ReactNode;
 }) {
   const tones = {
@@ -38,9 +40,14 @@ function IconButton({
       aria-label={title}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${tones[tone]}`}
+      className={`relative inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${tones[tone]}`}
     >
       {children}
+      {!!badge && (
+        <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-bad px-0.5 font-mono text-[9px] leading-none text-accent-fg">
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
@@ -171,24 +178,25 @@ export function QueuePage({ active }: { active: boolean }) {
             onChange={toggleAll}
           />
           <span className="text-sm text-fg-muted">{selectionLabel}</span>
-          <div className="ml-auto flex gap-2">
-            <Button
-              variant="secondary"
+          {/* Unchecking the header checkbox (above) clears the selection -
+              no separate "Clear selection" button needed. */}
+          <div className="ml-auto flex items-center gap-1">
+            <IconButton
+              title={`Retry ${selectedFailedCount} selected`}
+              badge={selectedFailedCount}
               disabled={selectedFailedCount === 0 || bulkRetryMutation.isPending}
               onClick={() => bulkRetryMutation.mutate([...selected])}
             >
-              Retry {selectedFailedCount > 0 ? `(${selectedFailedCount})` : ""}
-            </Button>
-            <Button
-              variant="danger"
+              <RotateCcw size={16} />
+            </IconButton>
+            <IconButton
+              title={`Remove ${selected.size} selected`}
+              tone="danger"
               disabled={selected.size === 0 || bulkRemoveMutation.isPending}
               onClick={() => bulkRemoveMutation.mutate([...selected])}
             >
-              Remove Selected
-            </Button>
-            <Button variant="ghost" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
-              Clear selection
-            </Button>
+              <Trash2 size={16} />
+            </IconButton>
           </div>
         </div>
 
