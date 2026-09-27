@@ -85,7 +85,31 @@ class Profile(BaseModel):
     phone: str = ""
     email: str = ""
     linkedin: str = ""
-    sheet_id: str
+    sheet_id: str = ""
     sheet_tab: str
     output_root: str
     template: str = "template.html"
+
+
+class ProfileDetail(Profile):
+    """Profile plus its prompt text, for the edit form. GET-only shape."""
+
+    prompt: str = ""
+
+
+class ProfileInput(BaseModel):
+    """Body for creating/updating a profile from the UI. `id` is only read on
+    create (path param is authoritative on update) and must be a filesystem-
+    safe slug: lowercase letters, digits, hyphens."""
+
+    id: str = ""
+    name: str
+    title: str = ""
+    location: str = ""
+    phone: str = ""
+    email: str = ""
+    linkedin: str = ""
+    sheet_id: str = ""
+    sheet_tab: str
+    output_root: str
+    prompt: str = ""

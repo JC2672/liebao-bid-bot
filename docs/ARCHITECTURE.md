@@ -71,23 +71,33 @@ Sheet tab + current queue → insert rows as `queued`     │ 1. create <Output 
 | staging_dir | path to `data/staging/<id>/` holding the generated PDF + JD.txt |
 | created_at, updated_at | |
 
-### Per-profile config — `profiles/<name>/profile.json`
+### Per-profile config — `profiles/<id>/profile.json`
+
+Profiles are created, edited, and deleted from the **Profiles screen** in the
+UI, not hand-edited. Each still lives on disk as a plain directory so nothing
+about the rest of the system (generation, staging, Output Root) has to change:
 
 ```jsonc
+// profiles/<id>/profile.json - id is a slug auto-derived from the name
 {
+  "id": "firstname-lastname",
   "name": "Firstname Lastname",
   "title": "",
   "location": "",
   "phone": "",
   "email": "",
   "linkedin": "",
-  "sheet_tab": "Firstname",          // tab name in the Google Sheet
+  "sheet_id": "",                     // Google Sheet ID (optional until Applied is used)
+  "sheet_tab": "Firstname",           // tab name in that Sheet
   "output_root": "F:/Applications/Firstname",
   "template": "template.html"
 }
 ```
-Plus `prompt.md` (the tailoring prompt you already use, JD gets appended) and
-`template.html` (the resume layout for this profile).
+Plus `prompt.md` (the tailoring prompt, JD gets appended) and `template.html`
+(the resume layout for this profile — starts as a copy of the shared
+`profiles/_default_template.html` on creation, then can be customized
+per-profile). Deleting a profile is blocked while it still has opportunities
+in the SQLite queue, to avoid silently orphaning in-flight work.
 
 ### Resume JSON schema (LLM output contract)
 
@@ -130,7 +140,23 @@ falling back to Company+Title).
 - Tier A — public ATS APIs: Greenhouse, Lever, Ashby (ToS-friendly, most accurate)
 - Tier B — aggregators via [JobSpy](https://github.com/speedyapply/JobSpy):
   LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google Jobs
-- Tier C (later) — Dice, RemoteOK, Remotive, Adzuna
+- Tier C — **Dice**: its own job-search API was shut down years ago, so this
+  scrapes the public, login-free search results page directly (server-rendered
+  HTML, no JS needed). Card-level only (title/company/location); full JD text
+  is not fetched per listing to keep request volume low.
+- Tier D (later) — RemoteOK, Remotive, Adzuna
+
+**Sources considered and rejected:**
+- **Jobright** — no public API; it's an account-gated AI job-matching app with
+  no plain search page to scrape. Third-party paid scrapers (Apify) exist but
+  weren't used.
+- **Jobgether** — Cloudflare-protected; job *detail* pages return HTTP 403 to
+  plain requests (the listing page loaded once, but its filtering doesn't
+  reliably apply and can't be trusted for gating). Reaching it would need real
+  browser automation to get past Cloudflare's challenge, which is a materially
+  different tier of effort/fragility than the other sources here. Worth
+  revisiting if/when the project has a browser-automation layer running
+  anyway (Phase 3's ChatGPT-web worker).
 
 **Hard gates** (reject, with a stored reason shown in the UI):
 - Salesforce relevance (keyword allow-list + negative list, to exclude

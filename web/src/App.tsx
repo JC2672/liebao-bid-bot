@@ -2,10 +2,11 @@ import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FetchPage } from "./pages/FetchPage";
 import { QueuePage } from "./pages/QueuePage";
+import { ProfilesPage } from "./pages/ProfilesPage";
 
 const queryClient = new QueryClient();
 
-type Tab = "fetch" | "queue";
+type Tab = "fetch" | "queue" | "profiles";
 
 function App() {
   const [tab, setTab] = useState<Tab>("fetch");
@@ -21,6 +22,7 @@ function App() {
                 [
                   ["fetch", "Fetch"],
                   ["queue", "Queue"],
+                  ["profiles", "Profiles"],
                 ] as [Tab, string][]
               ).map(([id, label]) => (
                 <button
@@ -40,7 +42,9 @@ function App() {
         </header>
 
         <main className="mx-auto max-w-6xl px-6 py-6">
-          {tab === "fetch" ? <FetchPage /> : <QueuePage />}
+          {tab === "fetch" && <FetchPage />}
+          {tab === "queue" && <QueuePage />}
+          {tab === "profiles" && <ProfilesPage />}
         </main>
       </div>
     </QueryClientProvider>

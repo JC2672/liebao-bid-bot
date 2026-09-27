@@ -37,6 +37,24 @@ export interface Profile {
   template: string;
 }
 
+export interface ProfileDetail extends Profile {
+  prompt: string;
+}
+
+export interface ProfileInput {
+  id?: string;
+  name: string;
+  title: string;
+  location: string;
+  phone: string;
+  email: string;
+  linkedin: string;
+  sheet_id: string;
+  sheet_tab: string;
+  output_root: string;
+  prompt: string;
+}
+
 export type OpportunityStatus = "queued" | "generating" | "ready" | "failed";
 
 export interface Opportunity {
@@ -62,6 +80,7 @@ export const SOURCE_OPTIONS = [
   { id: "zip_recruiter", label: "ZipRecruiter" },
   { id: "glassdoor", label: "Glassdoor" },
   { id: "google", label: "Google Jobs" },
+  { id: "dice", label: "Dice" },
 ];
 
 export async function runFetch(sources: string[], query: string, postedWithinDays: number) {
@@ -90,6 +109,25 @@ export async function exportShortlist(rows: GateResult[]) {
 export async function listProfiles() {
   const { data } = await api.get<Profile[]>("/profiles");
   return data;
+}
+
+export async function getProfile(id: string) {
+  const { data } = await api.get<ProfileDetail>(`/profiles/${id}`);
+  return data;
+}
+
+export async function createProfile(input: ProfileInput) {
+  const { data } = await api.post<Profile>("/profiles", input);
+  return data;
+}
+
+export async function updateProfile(id: string, input: ProfileInput) {
+  const { data } = await api.put<Profile>(`/profiles/${id}`, input);
+  return data;
+}
+
+export async function deleteProfile(id: string) {
+  await api.delete(`/profiles/${id}`);
 }
 
 export async function listQueue(profile: string) {
