@@ -9,6 +9,12 @@ up. The ChatGPT-web generation engine (Phase 3) is not yet built, so queued
 opportunities currently stay at `queued` — there's no PDF pipeline running
 against them yet.
 
+## Quick start
+
+Once both are set up once (below), double-click **`start.bat`** at the repo
+root — it opens the backend and frontend each in their own console window and
+opens `http://localhost:5173` in your browser. Close either window to stop it.
+
 ## Setup
 
 ### Backend (Python 3.12 — 3.13/3.14 don't have prebuilt numpy wheels yet for
