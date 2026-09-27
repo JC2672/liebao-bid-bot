@@ -143,20 +143,42 @@ falling back to Company+Title).
 ## Fetch: sources & gates
 
 **Sources** (each behind one `fetch(query) -> RawPosting[]` adapter). None of
-the ten need login or an API key - see each module's docstring for how it was
-verified, since first impressions from web search alone were wrong twice
-(Jobright and Jobgether both looked account-gated/blocked until inspected
-directly with a real browser):
+the seventeen need login or an API key - see each module's docstring for how
+it was verified, since first impressions (from web search, from a sibling
+local project's own config, or from a site's own published docs) have been
+wrong more than once: Jobright and Jobgether both looked account-gated/
+blocked until inspected directly with a real browser; Himalayas' own OpenAPI
+spec documents a search endpoint that returns a genuine live 404; a prior
+draft of the Greenhouse/Lever/Ashby company list, copied from that sibling
+project, turned out to be badly stale (63 of 192 tokens tried actually
+resolved). Every source below and every company-board token was checked live
+before being added, not assumed from a doc or another project's config:
 
 | Source | How | Notes |
 |---|---|---|
 | LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google Jobs | [JobSpy](https://github.com/speedyapply/JobSpy) | unofficial, rate-limit-sensitive |
 | Dice | HTML scrape, plain `requests` | own API shut down years ago; card-level only, no per-listing JD fetch |
 | Remotive | public JSON API | keeps to its own asked rate limit (fetch is on-demand only, never polled) |
-| RemoteOK | public JSON API, plain `requests` | `curl` on Windows hangs against this host (schannel TLS quirk) - `requests`/urllib3 has no such issue |
+| RemoteOK | public JSON API, plain `requests` | `curl` on Windows hangs against this host (schannel TLS quirk) - `requests`/urllib3 has no such issue. `tags` is an exact single-word match, not free text - first word of the query is used as the tag, falling back to a client-side filter over the general feed if that tag doesn't exist |
 | We Work Remotely | public RSS (combined "all jobs" feed, no keyword param) | |
 | Jobright | plain `requests`, reads the page's embedded `__NEXT_DATA__` JSON | richest data of any source (salary, H1B signal, seniority, remote/hybrid); only page 1 (~20 results) is reachable, `&page=` doesn't paginate the SSR payload |
 | Jobgether | **Playwright** (headless Chromium), DOM read | plain requests get HTTP 403 from Cloudflare on this one specifically; a real browser gets through with no login involved |
+| Himalayas | public JSON API, plain `requests` | its `/jobs/api/search?q=` endpoint is documented (in its own OpenAPI spec) but returns a live 404 - confirmed with a cache-busting param to rule out a stale CDN cache. Only `/jobs/api` (browse, cursor-paginated) is actually live, so this pulls a few pages of the most recent postings and filters client-side |
+| Jobicy | public JSON API | `tag` param genuinely filters server-side (unlike RemoteOK's); each job carries a real `jobGeo` field |
+| Arbeitnow | public JSON API, plain `requests` | no server-side search despite accepting `search`/`tags`/`q` params (all silently return the same unfiltered list, verified) - browse-only, filtered client-side |
+| Working Nomads | public JSON API, plain `requests` | same as Arbeitnow: no working filter param, small feed, filtered client-side |
+| Greenhouse, Lever, Ashby | direct per-company public JSON APIs, plain `requests`, fanned out concurrently | no cross-company search - each is one call per company's own board. `query` is unused (like We Work Remotely); gates.py's relevance filter does the real work over every job each company in the list has open. Company list lives in `ats_boards_source.py`, each token verified live before being added - re-verify before trusting an old copy of this list, since companies migrate ATS providers over time (this project's own first draft of the list, borrowed from elsewhere, was already a third stale) |
+
+**Investigated and not integrated:** The Muse - its public API has no
+free-text search and no category matching Salesforce/CRM, and is 400k+ jobs
+total, so scanning enough pages to find relevant postings isn't practical the
+way it is for the other browse-and-filter sources above (each of those is
+only tens-to-low-hundreds of postings total). Obra looks like an account-
+gated, swipe-based consumer app whose API is for employers posting jobs in,
+not for searching jobs out - not re-verified directly, so revisit if there's
+reason to think otherwise. Talent.com has no free official API (only paid
+third-party scrapers found) - unlike Jobright/Jobgether, not yet checked
+directly for whether it's scrapable anyway.
 
 **Login-gated sources:** none needed one so far. If a genuinely account-gated
 source comes up later, the plan is a Playwright **persistent-context**
@@ -164,6 +186,12 @@ profile per source: a "Sign in" action opens a real, visible browser window
 for the user to log in once, the resulting `storage_state` (cookies) is saved
 to disk, and later headless fetches reuse it. Not built, because nothing has
 required it yet.
+
+**Open question, not yet decided:** whether to keep scraping LinkedIn at all.
+A comparable local project (a sibling job-capture tool covering much of this
+same source list) deliberately excludes LinkedIn entirely as a matter of
+policy, given how aggressively LinkedIn enforces against scraping. This
+project currently still includes it via JobSpy.
 
 **Hard gates** (reject, with a stored reason shown in the UI):
 - Salesforce relevance (keyword allow-list + negative list, to exclude

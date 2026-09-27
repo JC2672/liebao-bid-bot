@@ -6,13 +6,18 @@ from __future__ import annotations
 
 from ..models import RawPosting
 from . import (
+    arbeitnow_source,
+    ats_boards_source,
     dice_source,
+    himalayas_source,
     jobgether_source,
+    jobicy_source,
     jobright_source,
     jobspy_source,
     remoteok_source,
     remotive_source,
     weworkremotely_source,
+    workingnomads_source,
 )
 
 SOURCES: dict[str, callable] = {
@@ -27,7 +32,20 @@ SOURCES: dict[str, callable] = {
     "weworkremotely": weworkremotely_source.fetch_weworkremotely,
     "jobgether": jobgether_source.fetch_jobgether,
     "jobright": jobright_source.fetch_jobright,
+    "himalayas": himalayas_source.fetch_himalayas,
+    "jobicy": jobicy_source.fetch_jobicy,
+    "arbeitnow": arbeitnow_source.fetch_arbeitnow,
+    "workingnomads": workingnomads_source.fetch_workingnomads,
+    "greenhouse": ats_boards_source.fetch_greenhouse,
+    "lever": ats_boards_source.fetch_lever,
+    "ashby": ats_boards_source.fetch_ashby,
 }
+
+# The Muse: investigated and NOT integrated. Its public API has no free-text
+# search and no category matching "Salesforce" (or CRM/tech at all usefully);
+# it's 400k+ jobs total, so scanning enough pages to find relevant postings
+# by chance isn't practical the way it is for We Work Remotely/Arbeitnow/
+# Working Nomads (each only tens-to-low-hundreds of postings total).
 
 # No source currently needs real login credentials - both Jobright and
 # Jobgether looked account-gated/blocked from web search and a plain curl

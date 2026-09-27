@@ -85,6 +85,13 @@ export const SOURCE_OPTIONS = [
   { id: "weworkremotely", label: "We Work Remotely", domain: "weworkremotely.com" },
   { id: "jobgether", label: "Jobgether", domain: "jobgether.com" },
   { id: "jobright", label: "Jobright", domain: "jobright.ai" },
+  { id: "himalayas", label: "Himalayas", domain: "himalayas.app" },
+  { id: "jobicy", label: "Jobicy", domain: "jobicy.com" },
+  { id: "arbeitnow", label: "Arbeitnow", domain: "arbeitnow.com" },
+  { id: "workingnomads", label: "Working Nomads", domain: "workingnomads.com" },
+  { id: "greenhouse", label: "Greenhouse", domain: "greenhouse.io" },
+  { id: "lever", label: "Lever", domain: "lever.co" },
+  { id: "ashby", label: "Ashby", domain: "ashbyhq.com" },
 ];
 
 // Google's favicon service, keyed by domain - gets every source's real logo
