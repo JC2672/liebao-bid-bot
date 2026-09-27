@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ExternalLink, FolderOpen, RotateCcw, Check, Trash2 } from "lucide-react";
 import {
   bulkRemove,
   bulkRetry,
@@ -13,7 +14,38 @@ import {
 } from "../lib/api";
 import { Button, Card, Checkbox, StatusBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
-export function QueuePage() {
+function IconButton({
+  title,
+  onClick,
+  disabled,
+  tone = "default",
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: "default" | "danger" | "primary";
+  children: React.ReactNode;
+}) {
+  const tones = {
+    default: "text-fg-muted hover:text-fg hover:bg-surface-hover",
+    danger: "text-bad hover:bg-bad-wash",
+    primary: "text-accent hover:bg-accent-wash",
+  } as const;
+  return (
+    <button
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${tones[tone]}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function QueuePage({ active }: { active: boolean }) {
   const queryClient = useQueryClient();
   const [profile, setProfile] = useState<string>("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -26,7 +58,9 @@ export function QueuePage() {
     queryKey: ["queue", activeProfile],
     queryFn: () => listQueue(activeProfile),
     enabled: !!activeProfile,
-    refetchInterval: 5000, // picks up status changes once the generation engine (Phase 3) runs
+    // only poll while this tab is actually visible - no point burning
+    // requests refreshing a table nobody's looking at
+    refetchInterval: active ? 5000 : false,
   });
   const rows = queueQuery.data ?? [];
 
@@ -71,6 +105,10 @@ export function QueuePage() {
       return next;
     });
   }
+
+  const selectionLabel = allSelected
+    ? `All selected (${rows.length})`
+    : `${selected.size} selected`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -120,42 +158,44 @@ export function QueuePage() {
         )}
       </Card>
 
-      {selected.size > 0 && (
-        <Card className="flex items-center gap-3 border-accent/40 bg-accent-wash p-3">
-          <span className="text-sm font-medium text-accent">{selected.size} selected</span>
-          <Button
-            variant="secondary"
-            disabled={selectedFailedCount === 0 || bulkRetryMutation.isPending}
-            onClick={() => bulkRetryMutation.mutate([...selected])}
-          >
-            Retry {selectedFailedCount > 0 ? `(${selectedFailedCount} failed)` : ""}
-          </Button>
-          <Button
-            variant="danger"
-            disabled={bulkRemoveMutation.isPending}
-            onClick={() => bulkRemoveMutation.mutate([...selected])}
-          >
-            Remove selected
-          </Button>
-          <Button variant="ghost" onClick={() => setSelected(new Set())}>
-            Clear selection
-          </Button>
-        </Card>
-      )}
-
       <Card className="p-4">
+        {/* Selection toolbar - always present above the table, not just
+            when something is selected, so it has a stable position. */}
+        <div className="mb-3 flex flex-wrap items-center gap-3 border-b border-border pb-3">
+          <Checkbox
+            checked={allSelected}
+            disabled={rows.length === 0}
+            ref={(el) => {
+              if (el) el.indeterminate = someSelected;
+            }}
+            onChange={toggleAll}
+          />
+          <span className="text-sm text-fg-muted">{selectionLabel}</span>
+          <div className="ml-auto flex gap-2">
+            <Button
+              variant="secondary"
+              disabled={selectedFailedCount === 0 || bulkRetryMutation.isPending}
+              onClick={() => bulkRetryMutation.mutate([...selected])}
+            >
+              Retry {selectedFailedCount > 0 ? `(${selectedFailedCount})` : ""}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={selected.size === 0 || bulkRemoveMutation.isPending}
+              onClick={() => bulkRemoveMutation.mutate([...selected])}
+            >
+              Remove Selected
+            </Button>
+            <Button variant="ghost" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
+              Clear selection
+            </Button>
+          </div>
+        </div>
+
         <Table>
           <THead>
             <Tr>
-              <Th className="w-8">
-                <Checkbox
-                  checked={allSelected}
-                  ref={(el) => {
-                    if (el) el.indeterminate = someSelected;
-                  }}
-                  onChange={toggleAll}
-                />
-              </Th>
+              <Th className="w-8" />
               <Th>Company</Th>
               <Th>Title</Th>
               <Th>Location</Th>
@@ -179,28 +219,35 @@ export function QueuePage() {
                   )}
                 </Td>
                 <Td>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="ghost" onClick={() => window.open(o.url, "_blank")}>
-                      Open Post
-                    </Button>
-                    <Button variant="ghost" disabled={!o.staging_dir} onClick={() => openFolder(o.id)}>
-                      Open Folder
-                    </Button>
-                    {o.status === "failed" && (
-                      <Button variant="secondary" onClick={() => retryMutation.mutate(o.id)}>
-                        Retry
-                      </Button>
-                    )}
-                    <Button
-                      variant="primary"
+                  <div className="flex items-center gap-1">
+                    <IconButton title="Open job post" onClick={() => window.open(o.url, "_blank")}>
+                      <ExternalLink size={16} />
+                    </IconButton>
+                    <IconButton
+                      title="Open folder"
+                      disabled={!o.staging_dir}
+                      onClick={() => openFolder(o.id)}
+                    >
+                      <FolderOpen size={16} />
+                    </IconButton>
+                    <IconButton
+                      title="Retry"
+                      disabled={o.status !== "failed"}
+                      onClick={() => retryMutation.mutate(o.id)}
+                    >
+                      <RotateCcw size={16} />
+                    </IconButton>
+                    <IconButton
+                      title="Mark applied"
+                      tone="primary"
                       disabled={o.status !== "ready" || appliedMutation.isPending}
                       onClick={() => appliedMutation.mutate(o.id)}
                     >
-                      Applied
-                    </Button>
-                    <Button variant="danger" onClick={() => removeMutation.mutate(o.id)}>
-                      Remove
-                    </Button>
+                      <Check size={16} />
+                    </IconButton>
+                    <IconButton title="Remove" tone="danger" onClick={() => removeMutation.mutate(o.id)}>
+                      <Trash2 size={16} />
+                    </IconButton>
                   </div>
                 </Td>
               </Tr>

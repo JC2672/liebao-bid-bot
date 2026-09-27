@@ -40,6 +40,23 @@ export function FetchPage() {
     setSources((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   }
 
+  function handleRunFetch() {
+    // Only prompt when there's something to lose - an empty or already-
+    // cleared list runs straight away.
+    if (
+      results.length > 0 &&
+      !confirm(`Discard the current list of ${results.length} fetched jobs and run a new fetch?`)
+    ) {
+      return;
+    }
+    fetchMutation.mutate();
+  }
+
+  function clearResults() {
+    setResults([]);
+    setCounts(null);
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <Card className="p-4">
@@ -86,7 +103,7 @@ export function FetchPage() {
           <Button
             variant="primary"
             disabled={sources.length === 0 || fetchMutation.isPending}
-            onClick={() => fetchMutation.mutate()}
+            onClick={handleRunFetch}
           >
             {fetchMutation.isPending ? "Fetching…" : "Run Fetch"}
           </Button>
@@ -127,16 +144,21 @@ export function FetchPage() {
                 Include rejected in export
               </label>
             </div>
-            <Button
-              variant="primary"
-              disabled={
-                exportMutation.isPending ||
-                (includeRejectedInExport ? results.length === 0 : results.every((r) => !r.passed))
-              }
-              onClick={() => exportMutation.mutate()}
-            >
-              Export Shortlist (.xlsx)
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={clearResults}>
+                Clear results
+              </Button>
+              <Button
+                variant="primary"
+                disabled={
+                  exportMutation.isPending ||
+                  (includeRejectedInExport ? results.length === 0 : results.every((r) => !r.passed))
+                }
+                onClick={() => exportMutation.mutate()}
+              >
+                Export Shortlist (.xlsx)
+              </Button>
+            </div>
           </div>
 
           <Table>

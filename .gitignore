@@ -16,6 +16,11 @@ data/
 *.db
 *.db-journal
 
+# Real profiles (name, email, phone, your actual resume prompt) - personal
+# data, never committed. _default_template.html is shared, non-personal, and
+# stays tracked.
+backend/profiles/*/
+
 # Secrets / config
 .env
 **/service-account.json
