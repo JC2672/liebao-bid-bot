@@ -1,0 +1,25 @@
+# Python
+backend/.venv/
+backend/**/__pycache__/
+*.pyc
+
+# Node
+web/node_modules/
+web/dist/
+extension/node_modules/
+extension/.output/
+extension/.wxt/
+
+# App data (local, per-machine)
+data/
+*.db
+*.db-journal
+
+# Secrets / config
+.env
+**/service-account.json
+**/settings.local.json
+
+# Editor/OS
+.DS_Store
+Thumbs.db
