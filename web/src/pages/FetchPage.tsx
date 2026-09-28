@@ -1,9 +1,90 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, Download } from "lucide-react";
 import { exportShortlist, runFetch, sourceIconUrl, SOURCE_OPTIONS, type FetchCounts, type GateResult } from "../lib/api";
 import { checkJobrightSession, isExtensionInstalled, openJobrightLoginTab } from "../lib/extensionBridge";
 import { LoadingOverlay } from "../components/LoadingOverlay";
 import { Badge, Button, Card, FlagBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
+
+// A split "Export" button: the label itself exports the shortlist (the
+// common case), the chevron opens a menu for the less-common "everything,
+// including rejected" export - replaces a separate "include rejected"
+// checkbox that most fetches never touched.
+function ExportMenu({
+  passedCount,
+  totalCount,
+  pending,
+  onExport,
+}: {
+  passedCount: number;
+  totalCount: number;
+  pending: boolean;
+  onExport: (scope: "shortlist" | "all") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="flex">
+        <Button
+          variant="primary"
+          className="rounded-r-none"
+          disabled={pending || passedCount === 0}
+          onClick={() => onExport("shortlist")}
+        >
+          <Download size={14} />
+          Export
+        </Button>
+        <button
+          type="button"
+          disabled={pending || totalCount === 0}
+          onClick={() => setOpen((o) => !o)}
+          aria-label="Export options"
+          className="inline-flex items-center rounded-r-md border-y border-r border-accent-hover bg-accent px-1.5 text-accent-fg transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <ChevronDown size={14} />
+        </button>
+      </div>
+
+      {open && (
+        <div className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface shadow-lg">
+          <button
+            disabled={passedCount === 0}
+            onClick={() => {
+              onExport("shortlist");
+              setOpen(false);
+            }}
+            className="block w-full px-3 py-2 text-left text-sm hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Shortlist Only
+            <span className="ml-1.5 text-xs text-fg-muted">({passedCount} passed)</span>
+          </button>
+          <button
+            disabled={totalCount === 0}
+            onClick={() => {
+              onExport("all");
+              setOpen(false);
+            }}
+            className="block w-full border-t border-border px-3 py-2 text-left text-sm hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Full List
+            <span className="ml-1.5 text-xs text-fg-muted">({totalCount} total, incl. rejected)</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function FetchPage() {
   const queryClient = useQueryClient();
@@ -13,7 +94,6 @@ export function FetchPage() {
   const [results, setResults] = useState<GateResult[]>([]);
   const [counts, setCounts] = useState<FetchCounts | null>(null);
   const [showRejected, setShowRejected] = useState(false);
-  const [includeRejectedInExport, setIncludeRejectedInExport] = useState(false);
   const [jobrightNotice, setJobrightNotice] = useState<string | null>(null);
 
   const jobrightSelected = sources.includes("jobright");
@@ -38,8 +118,7 @@ export function FetchPage() {
   });
 
   const exportMutation = useMutation({
-    mutationFn: () =>
-      exportShortlist(includeRejectedInExport ? results : results.filter((r) => r.passed)),
+    mutationFn: (rows: GateResult[]) => exportShortlist(rows),
   });
 
   const visible = useMemo(
@@ -186,38 +265,26 @@ export function FetchPage() {
       {results.length > 0 && (
         <Card className="p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-4">
-              <label className="flex items-center gap-2 text-sm text-fg-muted">
-                <input
-                  type="checkbox"
-                  checked={showRejected}
-                  onChange={(e) => setShowRejected(e.target.checked)}
-                />
-                Show rejected
-              </label>
-              <label className="flex items-center gap-2 text-sm text-fg-muted">
-                <input
-                  type="checkbox"
-                  checked={includeRejectedInExport}
-                  onChange={(e) => setIncludeRejectedInExport(e.target.checked)}
-                />
-                Include rejected in export
-              </label>
-            </div>
+            <label className="flex items-center gap-2 text-sm text-fg-muted">
+              <input
+                type="checkbox"
+                checked={showRejected}
+                onChange={(e) => setShowRejected(e.target.checked)}
+              />
+              Show rejected
+            </label>
             <div className="flex gap-2">
               <Button variant="ghost" onClick={clearResults}>
                 Clear results
               </Button>
-              <Button
-                variant="primary"
-                disabled={
-                  exportMutation.isPending ||
-                  (includeRejectedInExport ? results.length === 0 : results.every((r) => !r.passed))
+              <ExportMenu
+                passedCount={results.filter((r) => r.passed).length}
+                totalCount={results.length}
+                pending={exportMutation.isPending}
+                onExport={(scope) =>
+                  exportMutation.mutate(scope === "shortlist" ? results.filter((r) => r.passed) : results)
                 }
-                onClick={() => exportMutation.mutate()}
-              >
-                Export Shortlist (.xlsx)
-              </Button>
+              />
             </div>
           </div>
 

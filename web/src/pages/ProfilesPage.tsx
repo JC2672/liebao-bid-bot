@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail, MapPin, Phone, Link2 } from "lucide-react";
+import { Mail, MapPin, Pencil, Phone, Link2, Trash2 } from "lucide-react";
 import {
   createProfile,
   deleteProfile,
@@ -11,7 +11,7 @@ import {
   type Profile,
   type ProfileInput,
 } from "../lib/api";
-import { Button, Card } from "../components/ui";
+import { Button, Card, IconButton } from "../components/ui";
 
 // lucide-react has no brand/logo icons (dropped a while back) - confirmed
 // by checking the installed package's exports directly rather than
@@ -36,7 +36,17 @@ function ProfileCard({
 }) {
   return (
     <Card className="flex flex-col gap-3 p-4">
-      <div className="font-medium">{profile.name}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-medium">{profile.name}</div>
+        <div className="flex shrink-0 gap-1">
+          <IconButton title="Edit" onClick={onEdit}>
+            <Pencil size={14} />
+          </IconButton>
+          <IconButton title="Delete" tone="danger" disabled={deletePending} onClick={onDelete}>
+            <Trash2 size={14} />
+          </IconButton>
+        </div>
+      </div>
 
       <div className="flex flex-col gap-1.5 text-sm text-fg-muted">
         {profile.location && (
@@ -73,19 +83,6 @@ function ProfileCard({
         {!profile.location && !profile.phone && !profile.email && !profile.linkedin && (
           <span className="text-fg-muted/70">No contact details set</span>
         )}
-      </div>
-
-      <div className="font-mono text-[11px] text-fg-muted">
-        Sheet tab: {profile.sheet_tab || "—"} · {profile.output_root || "no output folder set"}
-      </div>
-
-      <div className="mt-auto flex gap-2 pt-1">
-        <Button variant="secondary" onClick={onEdit}>
-          Edit
-        </Button>
-        <Button variant="danger" disabled={deletePending} onClick={onDelete}>
-          Delete
-        </Button>
       </div>
     </Card>
   );

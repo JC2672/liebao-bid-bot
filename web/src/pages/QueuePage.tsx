@@ -12,45 +12,7 @@ import {
   removeOpportunity,
   retryOpportunity,
 } from "../lib/api";
-import { Button, Card, Checkbox, StatusBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
-
-function IconButton({
-  title,
-  onClick,
-  disabled,
-  tone = "default",
-  badge,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  disabled?: boolean;
-  tone?: "default" | "danger" | "primary";
-  badge?: number;
-  children: React.ReactNode;
-}) {
-  const tones = {
-    default: "text-fg-muted hover:text-fg hover:bg-surface-hover",
-    danger: "text-bad hover:bg-bad-wash",
-    primary: "text-accent hover:bg-accent-wash",
-  } as const;
-  return (
-    <button
-      title={title}
-      aria-label={title}
-      disabled={disabled}
-      onClick={onClick}
-      className={`relative inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${tones[tone]}`}
-    >
-      {children}
-      {!!badge && (
-        <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-bad px-0.5 font-mono text-[9px] leading-none text-accent-fg">
-          {badge}
-        </span>
-      )}
-    </button>
-  );
-}
+import { Button, Card, Checkbox, IconButton, StatusBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
 export function QueuePage({ active }: { active: boolean }) {
   const queryClient = useQueryClient();
