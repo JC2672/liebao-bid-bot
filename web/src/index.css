@@ -49,6 +49,59 @@
   --color-bad-wash: #f6e8e5;
 }
 
+/*
+  Dark mode keeps the same identity as light mode - warm neutrals, the same
+  forest-teal/ochre/brick semantic trio, just recalibrated for a dark
+  register - rather than becoming a different, generic near-black-plus-
+  neon-accent dashboard. Background is a warm charcoal-brown, not a cool
+  blue-black, and text is a warm paper white to match.
+
+  Two ways in, same values either way:
+  - `@media (prefers-color-scheme: dark)`, guarded by `:not([data-theme="light"])`
+    so an explicit light choice always wins over the OS setting.
+  - `[data-theme="dark"]`, the explicit toggle (see ThemeToggle.tsx),
+    for a viewer whose OS is light but wants dark here, or vice versa.
+*/
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #1c1a17;
+    --color-surface: #242220;
+    --color-surface-hover: #2c2924;
+    --color-border: #3a352f;
+    --color-fg: #f2efe9;
+    --color-fg-muted: #a39c8f;
+    --color-accent: #56a58d;
+    --color-accent-hover: #6bb69e;
+    --color-accent-fg: #0e1512;
+    --color-accent-wash: #1e2d29;
+    --color-good: #56a58d;
+    --color-good-wash: #1e2d29;
+    --color-warn: #d7a54c;
+    --color-warn-wash: #332a17;
+    --color-bad: #d9846d;
+    --color-bad-wash: #35211b;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #1c1a17;
+  --color-surface: #242220;
+  --color-surface-hover: #2c2924;
+  --color-border: #3a352f;
+  --color-fg: #f2efe9;
+  --color-fg-muted: #a39c8f;
+  --color-accent: #56a58d;
+  --color-accent-hover: #6bb69e;
+  --color-accent-fg: #0e1512;
+  --color-accent-wash: #1e2d29;
+  --color-good: #56a58d;
+  --color-good-wash: #1e2d29;
+  --color-warn: #d7a54c;
+  --color-warn-wash: #332a17;
+  --color-bad: #d9846d;
+  --color-bad-wash: #35211b;
+}
+
 @theme inline {
   --color-bg: var(--color-bg);
   --color-surface: var(--color-surface);
@@ -74,4 +127,10 @@ body {
   background: var(--color-bg);
   color: var(--color-fg);
   font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body {
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
 }

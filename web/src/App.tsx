@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FetchPage } from "./pages/FetchPage";
 import { QueuePage } from "./pages/QueuePage";
 import { ProfilesPage } from "./pages/ProfilesPage";
+import { ThemeToggle } from "./components/ThemeToggle";
 
 const queryClient = new QueryClient();
 
@@ -43,6 +44,9 @@ function App() {
                 </button>
               ))}
             </nav>
+            <div className="ml-auto py-3">
+              <ThemeToggle />
+            </div>
           </div>
         </header>
 
