@@ -11,17 +11,35 @@ at the first ~20 results - `&page=` doesn't paginate the SSR payload, and
 button) anonymous visitors have no "Next"/"Load more"/infinite-scroll at all
 to click through instead, unlike Talent.com.
 
-If a login session has been saved (see jobright_session.py - a dedicated
-Playwright-managed Chromium profile, not the user's own daily browser), this
-uses the real internal API those saved cookies unlock instead
+If a login session has been saved (see jobright_session.py - the companion
+Chrome extension, using the user's REAL browser, not a separate profile),
+this uses the real internal API those saved cookies unlock instead
 (`/swan/recommend/search`, paginated via `position`), which is what the
 site's own JS uses once logged in. Both paths return the same `jobResult`/
 `companyResult` job shape, so one mapping function serves both.
+
+A bare "Salesforce" search `value` is a genuine trap on this site - watched
+Jobright's own UI live (playwright-cli) and confirmed it: with `value=
+"Salesforce"`, every single result on the first page was a job AT Salesforce
+Inc itself ("Deal Desk Manager", "Customer Centric Engineer", generic
+corporate roles), because Jobright's relevance ranking for a bare company-
+shaped term is dominated by literal company-name matches. Typing a real role
+title into the same UI (e.g. "Salesforce Developer") produced completely
+different, genuinely relevant results (real client companies: TEKsystems,
+CGI, IBM, etc.) - confirming this isn't a quirk of our request, it's how the
+site's own search actually behaves. So the authenticated path below doesn't
+use the caller's free-text `query` at all - it runs a fixed set of seed role
+titles (SEED_TITLES) through the search concurrently and merges/dedupes the
+results, the same fix a sibling local project already carries (its
+`jobrightTitles` config, with the same one-line rationale in a comment) -
+independently rediscovered here by watching the real UI rather than copied
+from that config.
 """
 from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import requests
@@ -33,7 +51,33 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 SEARCH_URL = "https://jobright.ai/jobs/search"
 API_URL = "https://jobright.ai/swan/recommend/search"
 NEXT_DATA_RE = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
-MAX_AUTHENTICATED_PAGES = 5  # 20/page
+PAGES_PER_TITLE = 2  # 20/page - keeps ~19 titles x concurrent requests reasonable
+MAX_WORKERS = 8
+
+SEED_TITLES = [
+    "Salesforce Administrator",
+    "Salesforce Developer",
+    "Salesforce Consultant",
+    "Salesforce Business Analyst",
+    "Salesforce Architect",
+    "Salesforce Solution Architect",
+    "Salesforce Engineer",
+    "Salesforce Technical Lead",
+    "Salesforce QA Engineer",
+    "Salesforce Project Manager",
+    "Salesforce Marketing Cloud",
+    "Marketing Cloud Developer",
+    "MuleSoft Developer",
+    "Salesforce CPQ",
+    "Salesforce CPQ Developer",
+    "Health Cloud",
+    "Data Cloud",
+    "Service Cloud",
+    "Revenue Cloud",
+    "Financial Services Cloud",
+    "OmniStudio",
+    "Agentforce",
+]
 
 
 def _location(job: dict) -> str:
@@ -104,7 +148,7 @@ def _search_body(query: str, position: int, days_ago: int) -> dict:
     }
 
 
-def _fetch_authenticated(query: str, cookie_header: str, days_ago: int) -> list[RawPosting]:
+def _fetch_authenticated_one_title(title: str, cookie_header: str, days_ago: int) -> list[RawPosting]:
     headers = {
         "accept": "application/json, text/plain, */*",
         "content-type": "application/json",
@@ -113,14 +157,17 @@ def _fetch_authenticated(query: str, cookie_header: str, days_ago: int) -> list[
         "cookie": cookie_header,
     }
     postings: list[RawPosting] = []
-    for page in range(MAX_AUTHENTICATED_PAGES):
+    for page in range(PAGES_PER_TITLE):
         position = page * 20
-        resp = requests.post(
-            API_URL,
-            params={"searchType": "job_title", "refresh": "true", "count": 20,
-                    "position": position, "sortCondition": 0},
-            headers=headers, json=_search_body(query, position, days_ago), timeout=20,
-        )
+        try:
+            resp = requests.post(
+                API_URL,
+                params={"searchType": "job_title", "refresh": "true", "count": 20,
+                        "position": position, "sortCondition": 0},
+                headers=headers, json=_search_body(title, position, days_ago), timeout=20,
+            )
+        except requests.RequestException:
+            break
         if resp.status_code != 200:
             break
         data = resp.json()
@@ -133,19 +180,32 @@ def _fetch_authenticated(query: str, cookie_header: str, days_ago: int) -> list[
     return postings
 
 
-def fetch_jobright(query: str, posted_within_days: int = 7) -> list[RawPosting]:
+def _fetch_authenticated_seeded(cookie_header: str, days_ago: int) -> list[RawPosting]:
+    """Runs SEED_TITLES concurrently and dedupes by job ID - the same
+    listing (e.g. a generic "Salesforce Developer" role) often turns up
+    under more than one seed title."""
+    seen: set[str] = set()
+    postings: list[RawPosting] = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        for batch in pool.map(
+            lambda t: _fetch_authenticated_one_title(t, cookie_header, days_ago), SEED_TITLES
+        ):
+            for posting in batch:
+                if posting.external_id in seen:
+                    continue
+                seen.add(posting.external_id)
+                postings.append(posting)
+    return postings
+
+
+def fetch_jobright(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - authenticated path uses SEED_TITLES instead, see module docstring
     # `daysAgo` is a real server-side recency filter (confirmed live: results
-    # scale sensibly - daysAgo=1 -> ~69 results, daysAgo=7 -> ~1142, daysAgo=30
-    # -> ~2432, for query "Salesforce"). Passing it is the actual fix for a
-    # real bug found live: without it, a fixed ~100-result window (5 pages x
-    # 20, sorted by relevance/default, not date) can miss almost everything
-    # actually posted in the last day, because gates.py's own posted-within-
-    # N-days gate then discards whatever in that window is too old - it
-    # can't recover jobs that were never fetched in the first place. Verified
-    # against a real account: with daysAgo unset, a posted_within_days=1
-    # fetch surfaced only 1 job; with it wired in as below, 17 (workModel
-    # unrestricted) - consistent with a real manual same-day search.
+    # scale sensibly with it). Passing it is the fix for a real bug found
+    # live: without it, a fixed-size window sorted by relevance/default (not
+    # date) can miss almost everything actually posted recently, because
+    # gates.py's own posted-within-N-days gate can only discard from what
+    # was fetched - it can't recover jobs that were never fetched at all.
     cookie_header = jobright_session.get_cookie_header()
     if cookie_header and jobright_session.check_session():
-        return _fetch_authenticated(query, cookie_header, posted_within_days)
-    return _fetch_anonymous(query, posted_within_days)
+        return _fetch_authenticated_seeded(cookie_header, posted_within_days)
+    return _fetch_anonymous("Salesforce", posted_within_days)
