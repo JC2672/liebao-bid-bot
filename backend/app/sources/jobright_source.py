@@ -53,6 +53,7 @@ import requests
 
 from .. import jobright_session
 from ..models import RawPosting
+from ._salesforce_titles import SALESFORCE_TITLES
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 SEARCH_URL = "https://jobright.ai/jobs/search"
@@ -61,43 +62,9 @@ NEXT_DATA_RE = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.
 PAGES_PER_TITLE = 2  # 20/page - keeps ~28 titles x concurrent requests reasonable
 MAX_WORKERS = 8
 
-# Each title here was checked against the real API (not just guessed) -
-# either carried over from the first pass, or added/rejected after probing
-# real result counts and sample titles. See the module docstring.
-SEED_TITLES = [
-    "Salesforce Administrator",
-    "Salesforce Developer",
-    "Salesforce Consultant",
-    "Salesforce Business Analyst",
-    "Salesforce Architect",
-    "Salesforce Solution Architect",
-    "Salesforce Solutions Architect",  # distinct phrasing, 75 real matches on its own
-    "Salesforce Technical Architect",  # 36 real matches
-    "Salesforce Engineer",
-    "Salesforce Technical Lead",
-    "Salesforce Technical Consultant",
-    "Salesforce Functional Consultant",
-    "Salesforce QA Engineer",
-    "Salesforce Quality Assurance",
-    "Salesforce Testing",
-    "Salesforce DevOps Engineer",
-    "Salesforce Support Engineer",
-    "Salesforce Integration",
-    "Salesforce Product Owner",
-    "Salesforce Project Manager",
-    "Salesforce Marketing Cloud",
-    "Marketing Cloud Developer",
-    "MuleSoft Developer",
-    "Salesforce CPQ",
-    "Salesforce CPQ Developer",
-    "Health Cloud",
-    "Data Cloud",
-    "Service Cloud",
-    "Revenue Cloud",
-    "Financial Services Cloud",
-    "OmniStudio",
-    "Agentforce",
-]
+# SALESFORCE_TITLES (shared - see _salesforce_titles.py) was built and
+# checked against this project's real API, not guessed.
+SEED_TITLES = SALESFORCE_TITLES
 
 
 def _location(job: dict) -> str:

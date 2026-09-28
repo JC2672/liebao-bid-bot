@@ -6,12 +6,14 @@ of the app never touches jobspy's DataFrame directly.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import pandas as pd
 from jobspy import scrape_jobs
 
 from ..models import RawPosting
+from ._salesforce_titles import SALESFORCE_TITLES
 
 DEFAULT_LOCATION = "United States"
 DEFAULT_RESULTS = 50
@@ -41,7 +43,8 @@ def _row_to_posting(source: str, row: pd.Series) -> RawPosting:
 
 
 def _scrape(
-    site_name: str, query: str, posted_within_days: int, location: str = DEFAULT_LOCATION,
+    site_name: str, query: str, posted_within_days: int,
+    location: str = DEFAULT_LOCATION, results_wanted: int = DEFAULT_RESULTS,
 ) -> list[RawPosting]:
     # `hours_old` asks the site itself to filter by recency, same fix as
     # Jobright's daysAgo (see jobright_source.py's docstring): without it,
@@ -56,7 +59,7 @@ def _scrape(
         site_name=[site_name],
         search_term=query,
         location=location,
-        results_wanted=DEFAULT_RESULTS,
+        results_wanted=results_wanted,
         country_indeed="USA",
         hours_old=posted_within_days * 24,
     )
@@ -90,8 +93,40 @@ def fetch_linkedin(query: str, posted_within_days: int = 7) -> list[RawPosting]:
     return _scrape("linkedin", query, posted_within_days)
 
 
-def fetch_indeed(query: str, posted_within_days: int = 7) -> list[RawPosting]:
-    return _scrape("indeed", query, posted_within_days)
+INDEED_WORKERS = 4  # gentler than Jobright's 8 - Indeed is known to be stricter about scraping
+INDEED_RESULTS_PER_TITLE = 25
+
+
+def fetch_indeed(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - uses SALESFORCE_TITLES instead, see below
+    # A bare "Salesforce" query is a similarly weak search on Indeed as it
+    # was on Jobright (see jobright_source.py's docstring for the fuller
+    # story) - confirmed live: with query="Salesforce", 50 fetched but only
+    # 2 passed gates.py's relevance gate (both from the same company); with
+    # query="Salesforce Developer" alone, 50 fetched and 19 passed, and
+    # "Salesforce Administrator"/"Salesforce Consultant" did comparably well
+    # (30 and 34 of their own fetches). So this runs the same shared title
+    # list Jobright uses (SALESFORCE_TITLES) rather than the caller's free
+    # text, fanned out with modest concurrency (lower than Jobright's, and a
+    # smaller per-title result cap) since Indeed is known to be stricter
+    # about scraping than Jobright turned out to be.
+    seen_urls: set[str] = set()
+    postings: list[RawPosting] = []
+
+    def _one(title: str) -> list[RawPosting]:
+        try:
+            return _scrape("indeed", title, posted_within_days, results_wanted=INDEED_RESULTS_PER_TITLE)
+        except Exception as exc:  # noqa: BLE001 - one title failing shouldn't kill the fetch
+            print(f"[jobspy] indeed title={title!r} failed: {exc}")
+            return []
+
+    with ThreadPoolExecutor(max_workers=INDEED_WORKERS) as pool:
+        for batch in pool.map(_one, SALESFORCE_TITLES):
+            for posting in batch:
+                if posting.url in seen_urls:
+                    continue
+                seen_urls.add(posting.url)
+                postings.append(posting)
+    return postings
 
 
 def fetch_zip_recruiter(query: str, posted_within_days: int = 7) -> list[RawPosting]:

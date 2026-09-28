@@ -169,7 +169,8 @@ before being added, not assumed from a doc or another project's config:
 | Source | How | Notes |
 |---|---|---|
 | LinkedIn | [JobSpy](https://github.com/speedyapply/JobSpy), `location="United States"` | "remote only" was asked for, but neither achievable lever actually narrows to *US* remote: JobSpy's `is_remote=True` flag sends LinkedIn's real `f_WT=2` filter param, but was verified live to have **zero effect** (identical top-15 results with and without it, checked via both the raw HTTP response and JobSpy's own parser) - LinkedIn's guest/anonymous endpoint appears to just not honor it anymore. `location="Remote"` *does* genuinely change the result set, but worldwide rather than US-specific (mostly Poland/India/Vietnam-type postings the US-location gate then discards) - a worse trade than `location="United States"`, where every result is at least US-based even if not every one is remote. "Exclude Easy Apply" is **not achievable at all**: LinkedIn's own search only offers an "Easy Apply ONLY" filter, no exclude option, and JobSpy's LinkedIn scraper never even records whether a posting is Easy Apply |
-| Indeed, Glassdoor, ZipRecruiter, Google Jobs | [JobSpy](https://github.com/speedyapply/JobSpy) | unofficial, rate-limit-sensitive |
+| Indeed | [JobSpy](https://github.com/speedyapply/JobSpy), fanned out over `SALESFORCE_TITLES` (same shared list Jobright uses, see below) | a bare `query="Salesforce"` is a similarly weak search on Indeed as it was on Jobright: confirmed live, 50 fetched but only 2 passed gates.py's relevance gate, both from the same company, vs. `query="Salesforce Developer"` alone getting 19 of 50 to pass. So this ignores the caller's free-text query and instead runs the shared `SALESFORCE_TITLES` list concurrently (4 workers, lower than Jobright's 8, and a smaller per-title result cap - Indeed is known to be stricter about scraping than Jobright turned out to be), deduping by URL. Verified end-to-end: 117 passing results vs. 2 before, real companies (Deloitte, BCG, Fortinet, etc.) |
+| Glassdoor, ZipRecruiter, Google Jobs | [JobSpy](https://github.com/speedyapply/JobSpy) | unofficial, rate-limit-sensitive; still uses the caller's free-text query as-is - not yet individually checked for the same query-relevance issue Jobright/Indeed had, per "let's take them one at a time" |
 | Dice | HTML scrape, plain `requests` | own API shut down years ago; card-level only, no per-listing JD fetch |
 | Remotive | public JSON API | keeps to its own asked rate limit (fetch is on-demand only, never polled) |
 | RemoteOK | public JSON API, plain `requests` | `curl` on Windows hangs against this host (schannel TLS quirk) - `requests`/urllib3 has no such issue. `tags` is an exact single-word match, not free text - first word of the query is used as the tag, falling back to a client-side filter over the general feed if that tag doesn't exist |
@@ -256,7 +257,20 @@ project currently still includes it via JobSpy.
 
 **Hard gates** (reject, with a stored reason shown in the UI):
 - Salesforce relevance (keyword allow-list + negative list, to exclude
-  "Account Executive at Salesforce Inc." style false positives)
+  "Account Executive at Salesforce Inc." style false positives). Matches
+  against the **title only**, not title+description - originally checked
+  both, but that let through a real, common false-positive pattern found
+  live on Indeed: a long JD mentioning Salesforce only as a tool the role
+  happens to use (e.g. "Healthcare Sales Director" passed because its
+  description said "...tracking in Salesforce", despite having nothing to
+  do with Salesforce development/administration). Every genuine
+  Salesforce-ecosystem role this project targets says so in the title
+  itself. Confirmed this wasn't a regression by inspecting what it now
+  rejects from Greenhouse specifically (which returns every open job at
+  ~55 companies, unfiltered by query, relying entirely on this gate for
+  relevance): of 8,886 fetched, only 2 had "Salesforce" in the title, vs.
+  1,215 that merely mentioned it somewhere in the description (Client
+  Success Lead, Analytics Engineer, etc. - correctly rejected)
 - US-located or explicitly Remote-US (location string parsing, not just the
   word "remote" — catches "Remote – India", "Remote (EMEA)")
 - Posted within N days (default 7, configurable on the fetch screen)

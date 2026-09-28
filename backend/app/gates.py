@@ -14,9 +14,11 @@ from .models import GateResult, RawPosting
 
 SALESFORCE_ALLOW = re.compile(
     r"\b(salesforce|apex|visualforce|lwc|lightning\s+web\s+component|"
-    r"soql|sosl|omnistudio|vlocity|cpq|pardot|marketing\s+cloud|"
-    r"service\s+cloud|sales\s+cloud|experience\s+cloud|salesforce\s+admin|"
-    r"salesforce\s+developer|salesforce\s+architect|salesforce\s+consultant)\b",
+    r"soql|sosl|omnistudio|vlocity|mulesoft|cpq|pardot|marketing\s+cloud|"
+    r"service\s+cloud|sales\s+cloud|experience\s+cloud|data\s+cloud|"
+    r"health\s+cloud|revenue\s+cloud|financial\s+services\s+cloud|"
+    r"agentforce|salesforce\s+admin|salesforce\s+developer|"
+    r"salesforce\s+architect|salesforce\s+consultant)\b",
     re.IGNORECASE,
 )
 
@@ -31,11 +33,20 @@ SALESFORCE_TITLE_NEGATIVE = re.compile(
 
 
 def _is_salesforce_relevant(posting: RawPosting) -> bool:
-    text = f"{posting.title}\n{posting.description}"
-    if not SALESFORCE_ALLOW.search(text):
+    # Title-only, not title+description: a passing tool mention buried in a
+    # long description is not enough on its own - confirmed as a real,
+    # common false-positive pattern live (Indeed): "Healthcare Sales
+    # Director" passed because its JD said "...tracking in Salesforce",
+    # despite the role having nothing to do with Salesforce development/
+    # administration. Genuine Salesforce-ecosystem roles overwhelmingly say
+    # so in the title itself (Salesforce Developer, Marketing Cloud
+    # Developer, MuleSoft Developer, etc.) - every example the user asked
+    # this project to target does. Some sources don't fetch full
+    # descriptions at all (Dice, Jobgether, Talent.com), so this also makes
+    # gating consistent across sources rather than accidentally stricter
+    # for ones that happen to return rich description text.
+    if not SALESFORCE_ALLOW.search(posting.title):
         return False
-    # Reject sales-role titles even if the description mentions Salesforce
-    # tech in passing (e.g. "Account Executive" selling into Salesforce shops).
     if SALESFORCE_TITLE_NEGATIVE.search(posting.title):
         return False
     return True
