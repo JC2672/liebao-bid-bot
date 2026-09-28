@@ -24,7 +24,8 @@ function App() {
         <header className="border-b border-border bg-surface">
           <div className="mx-auto flex max-w-7xl items-center gap-8 px-6">
             <div className="flex items-center gap-2 py-3">
-              <img src="/logo.png" alt="" className="h-8 w-8 object-contain" />
+              <img src="/logo.png" alt="" className="logo-light h-8 w-8 object-contain" />
+              <img src="/brand/logo-white.png" alt="" className="logo-dark h-8 w-8 object-contain" />
               <span className="font-mono text-sm font-medium tracking-tight text-fg">
                 liebao-bid-bot
               </span>

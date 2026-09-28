@@ -31,6 +31,7 @@
 */
 
 :root {
+  color-scheme: light;
   --color-bg: #f7f6f3;
   --color-surface: #ffffff;
   --color-surface-hover: #f0eee8;
@@ -39,6 +40,10 @@
   --color-fg-muted: #756f64;
   --color-accent: #2b6355;
   --color-accent-hover: #234f44;
+  /* Always light: every accent-colored surface (button, badge) is dark/
+     saturated enough in both themes for light text to read on it - see the
+     dark-mode note below for why this is deliberately NOT overridden per
+     theme. */
   --color-accent-fg: #f5f3ee;
   --color-accent-wash: #e7efec;
   --color-good: #2b6355;
@@ -64,18 +69,24 @@
 */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --color-bg: #1c1a17;
     --color-surface: #242220;
     --color-surface-hover: #2c2924;
     --color-border: #3a352f;
     --color-fg: #f2efe9;
     --color-fg-muted: #a39c8f;
-    --color-accent: #56a58d;
-    --color-accent-hover: #6bb69e;
-    --color-accent-fg: #0e1512;
-    --color-accent-wash: #1e2d29;
-    --color-good: #56a58d;
-    --color-good-wash: #1e2d29;
+    /* Deliberately not as light as the surrounding surfaces: this same
+       value is a button/badge BACKGROUND (needs to stay dark enough for
+       --color-accent-fg's light text to read on it, ~4.6:1) as well as
+       foreground text/icon/border color elsewhere (needs to stand out
+       against --color-bg/--color-surface, ~3-3.4:1) - checked both
+       directions rather than just picking something that "pops". */
+    --color-accent: #337a63;
+    --color-accent-hover: #3f9678;
+    --color-accent-wash: #1c2b26;
+    --color-good: #337a63;
+    --color-good-wash: #1c2b26;
     --color-warn: #d7a54c;
     --color-warn-wash: #332a17;
     --color-bad: #d9846d;
@@ -84,18 +95,18 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --color-bg: #1c1a17;
   --color-surface: #242220;
   --color-surface-hover: #2c2924;
   --color-border: #3a352f;
   --color-fg: #f2efe9;
   --color-fg-muted: #a39c8f;
-  --color-accent: #56a58d;
-  --color-accent-hover: #6bb69e;
-  --color-accent-fg: #0e1512;
-  --color-accent-wash: #1e2d29;
-  --color-good: #56a58d;
-  --color-good-wash: #1e2d29;
+  --color-accent: #337a63;
+  --color-accent-hover: #3f9678;
+  --color-accent-wash: #1c2b26;
+  --color-good: #337a63;
+  --color-good-wash: #1c2b26;
   --color-warn: #d7a54c;
   --color-warn-wash: #332a17;
   --color-bad: #d9846d;
@@ -127,6 +138,35 @@ body {
   background: var(--color-bg);
   color: var(--color-fg);
   font-family: var(--font-sans);
+}
+
+/* Every clickable button in the app, not just the ones already carrying an
+   explicit disabled:cursor-not-allowed utility (ui.tsx's Button) - the raw
+   <button>s (nav tabs, source-toggle chips, icon buttons) had no cursor
+   override and fell back to the browser default arrow. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Header logo: the plain-color mark reads fine on the light paper
+   background but disappears against dark charcoal, so dark mode swaps to
+   the white mark instead (App.tsx renders both; this just picks one). */
+.logo-dark {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .logo-light {
+    display: none;
+  }
+  :root:not([data-theme="light"]) .logo-dark {
+    display: block;
+  }
+}
+:root[data-theme="dark"] .logo-light {
+  display: none;
+}
+:root[data-theme="dark"] .logo-dark {
+  display: block;
 }
 
 @media (prefers-reduced-motion: no-preference) {
