@@ -17,6 +17,7 @@ from ..models import RawPosting
 from . import (
     arbeitnow_source,
     ats_boards_source,
+    builtin_source,
     dice_source,
     himalayas_source,
     jobgether_source,
@@ -50,6 +51,7 @@ SOURCES: dict[str, callable] = {
     "lever": ats_boards_source.fetch_lever,
     "ashby": ats_boards_source.fetch_ashby,
     "talent": talent_source.fetch_talent,
+    "builtin": builtin_source.fetch_builtin,
 }
 
 # The Muse: investigated and NOT integrated. Its public API has no free-text
