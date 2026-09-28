@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { exportShortlist, runFetch, sourceIconUrl, SOURCE_OPTIONS, type FetchCounts, type GateResult } from "../lib/api";
 import { checkJobrightSession, isExtensionInstalled, openJobrightLoginTab } from "../lib/extensionBridge";
+import { LoadingOverlay } from "../components/LoadingOverlay";
 import { Badge, Button, Card, FlagBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
 export function FetchPage() {
@@ -44,6 +45,11 @@ export function FetchPage() {
   const visible = useMemo(
     () => results.filter((r) => showRejected || r.passed),
     [results, showRejected],
+  );
+
+  const selectedDomains = useMemo(
+    () => SOURCE_OPTIONS.filter((s) => sources.includes(s.id)).map((s) => s.domain),
+    [sources],
   );
 
   function toggleSource(id: string) {
@@ -89,6 +95,8 @@ export function FetchPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {fetchMutation.isPending && <LoadingOverlay domains={selectedDomains} />}
+
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
           <div className="flex flex-col gap-1.5">
