@@ -55,6 +55,7 @@ def _row_to_posting(source: str, row: pd.Series) -> RawPosting:
 def _scrape(
     site_name: str, query: str, posted_within_days: int,
     location: str = DEFAULT_LOCATION, results_wanted: int = DEFAULT_RESULTS,
+    linkedin_fetch_description: bool = False,
 ) -> list[RawPosting]:
     # `hours_old` asks the site itself to filter by recency, same fix as
     # Jobright's daysAgo (see jobright_source.py's docstring): without it,
@@ -72,6 +73,7 @@ def _scrape(
         results_wanted=results_wanted,
         country_indeed="USA",
         hours_old=posted_within_days * 24,
+        linkedin_fetch_description=linkedin_fetch_description,
     )
     if df is None or df.empty:
         return []
@@ -100,7 +102,16 @@ def fetch_linkedin(query: str, posted_within_days: int = 7) -> list[RawPosting]:
     # option, and jobspy's LinkedIn scraper never populates an `easy_apply`
     # field on scraped results either - there's nothing to filter on
     # after the fact.
-    return _scrape("linkedin", query, posted_within_days)
+    #
+    # linkedin_fetch_description=True: by default jobspy only reads the
+    # search-results card (title/company/location, no JD), same limitation
+    # Dice has. Without it, gates.py's flags (no-sponsorship, C2C/W2-only,
+    # staffing-agency) can never fire on LinkedIn rows since they scan
+    # description text - title-relevance itself is unaffected (title-only).
+    # Costs one extra request per result (visits each job's own page), so
+    # slower and a somewhat higher chance of LinkedIn rate-limiting than the
+    # card-only default - accepted tradeoff for working flags.
+    return _scrape("linkedin", query, posted_within_days, linkedin_fetch_description=True)
 
 
 INDEED_WORKERS = 4  # gentler than Jobright's 8 - Indeed is known to be stricter about scraping

@@ -33,7 +33,7 @@ from datetime import datetime
 
 import requests
 
-from ..gates import REMOTE_NON_US_RE, REMOTE_RE, _is_salesforce_relevant
+from ..gates import _is_salesforce_relevant, _is_us_or_us_remote
 from ..models import RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -41,19 +41,17 @@ MAX_WORKERS = 16
 
 
 def _is_relevant(posting: RawPosting) -> bool:
-    # Title relevance reuses gates.py's own check rather than a second copy
-    # of the regex, so the two can't silently drift apart. Location is
-    # stricter than gates.py's general US-or-remote gate: bare "United
-    # States" with no "remote" qualifier is ambiguous (could be onsite),
-    # and per the user's ask this fan-out should keep to Remote specifically
-    # - "United States, Remote"/"-REMOTE, USA-"/"Remote - USA" style values
-    # observed live all still match REMOTE_RE.
+    # Title and location both reuse gates.py's own checks rather than a
+    # second copy of the regexes, so the two can't silently drift apart.
+    # A first pass here required an explicit "remote" qualifier in the
+    # location text (rejecting bare "United States" as ambiguous/possibly
+    # onsite), but that band was too narrow per live testing - a legitimate
+    # match like "Salesforce Engineer III, FedRAMP | MongoDB | United
+    # States" got dropped along with the genuinely irrelevant ones. Back to
+    # the same US-or-remote definition every other source uses.
     if not _is_salesforce_relevant(posting):
         return False
-    loc = posting.location or ""
-    if REMOTE_NON_US_RE.search(loc):
-        return False
-    return bool(REMOTE_RE.search(loc))
+    return _is_us_or_us_remote(posting)
 
 # Verified live (2026-09-27): each token below returned a real, non-empty
 # job list at the time of checking. Extend freely, but verify new entries
