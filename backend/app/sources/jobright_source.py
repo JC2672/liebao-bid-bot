@@ -23,17 +23,24 @@ Jobright's own UI live (playwright-cli) and confirmed it: with `value=
 "Salesforce"`, every single result on the first page was a job AT Salesforce
 Inc itself ("Deal Desk Manager", "Customer Centric Engineer", generic
 corporate roles), because Jobright's relevance ranking for a bare company-
-shaped term is dominated by literal company-name matches. Typing a real role
-title into the same UI (e.g. "Salesforce Developer") produced completely
-different, genuinely relevant results (real client companies: TEKsystems,
-CGI, IBM, etc.) - confirming this isn't a quirk of our request, it's how the
-site's own search actually behaves. So the authenticated path below doesn't
-use the caller's free-text `query` at all - it runs a fixed set of seed role
-titles (SEED_TITLES) through the search concurrently and merges/dedupes the
-results, the same fix a sibling local project already carries (its
-`jobrightTitles` config, with the same one-line rationale in a comment) -
-independently rediscovered here by watching the real UI rather than copied
-from that config.
+shaped term is dominated by literal company-name matches - confirmed harder
+with `workModel=[2]` (Remote): 574 total matches, and the first 200 checked
+(10 pages) were *all* Salesforce Inc itself, zero exceptions. Typing a real
+role title into the same UI (e.g. "Salesforce Developer") produced
+completely different, genuinely relevant results (real client companies:
+TEKsystems, CGI, IBM, etc.) - confirming this isn't a quirk of our request,
+it's how the site's own search actually behaves. So the authenticated path
+below doesn't use the caller's free-text `query` at all - it runs a fixed
+set of seed role titles (SEED_TITLES) through the search concurrently and
+merges/dedupes the results, the same fix a sibling local project already
+carries (its `jobrightTitles` config, with the same one-line rationale in a
+comment) - independently rediscovered here by watching the real UI rather
+than copied from that config, then expanded by probing candidate titles
+against the real API and checking their actual result counts/samples rather
+than guessing (e.g. "Tableau CRM" and "Experience Cloud" looked promising by
+name but turned out polluted by unrelated Adobe/BI results and were left
+out; "Salesforce Technical Architect" and "Salesforce Solutions Architect"
+turned out highly productive - 36 and 75 real matches - and were added).
 """
 from __future__ import annotations
 
@@ -51,9 +58,12 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 SEARCH_URL = "https://jobright.ai/jobs/search"
 API_URL = "https://jobright.ai/swan/recommend/search"
 NEXT_DATA_RE = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
-PAGES_PER_TITLE = 2  # 20/page - keeps ~19 titles x concurrent requests reasonable
+PAGES_PER_TITLE = 2  # 20/page - keeps ~28 titles x concurrent requests reasonable
 MAX_WORKERS = 8
 
+# Each title here was checked against the real API (not just guessed) -
+# either carried over from the first pass, or added/rejected after probing
+# real result counts and sample titles. See the module docstring.
 SEED_TITLES = [
     "Salesforce Administrator",
     "Salesforce Developer",
@@ -61,9 +71,19 @@ SEED_TITLES = [
     "Salesforce Business Analyst",
     "Salesforce Architect",
     "Salesforce Solution Architect",
+    "Salesforce Solutions Architect",  # distinct phrasing, 75 real matches on its own
+    "Salesforce Technical Architect",  # 36 real matches
     "Salesforce Engineer",
     "Salesforce Technical Lead",
+    "Salesforce Technical Consultant",
+    "Salesforce Functional Consultant",
     "Salesforce QA Engineer",
+    "Salesforce Quality Assurance",
+    "Salesforce Testing",
+    "Salesforce DevOps Engineer",
+    "Salesforce Support Engineer",
+    "Salesforce Integration",
+    "Salesforce Product Owner",
     "Salesforce Project Manager",
     "Salesforce Marketing Cloud",
     "Marketing Cloud Developer",
@@ -138,7 +158,11 @@ def _search_body(query: str, position: int, days_ago: int) -> dict:
     return {
         "searchType": "job_title", "value": query,
         "jobTaxonomyList": [{"taxonomyId": "00-00-00", "title": query}],
-        "country": "US", "jobTypes": [], "seniority": [], "workModel": [],
+        # workModel: 1=Onsite, 2=Remote, 3=Hybrid (confirmed live against the
+        # real field values jobs return, not assumed - see gates.py's own
+        # US-remote scope: this project wants remote roles, and Jobright's
+        # results otherwise skew heavily onsite/hybrid).
+        "country": "US", "jobTypes": [], "seniority": [], "workModel": [2],
         "locations": [], "companies": [], "isH1BOnly": False, "companyCategory": None,
         "annualSalaryMinimum": None, "roleType": None, "companyStages": None, "skills": [],
         "excludedCompanies": [], "excludedSkills": None, "excludeStaffingAgency": False,
