@@ -37,7 +37,7 @@ def _clean_description(html: str) -> str:
     return BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
 
 
-def fetch_weworkremotely(query: str) -> list[RawPosting]:  # noqa: ARG001 - no server-side search param
+def fetch_weworkremotely(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side search or date filter
     resp = requests.get(FEED_URL, headers=HEADERS, timeout=20)
     resp.raise_for_status()
     root = ET.fromstring(resp.text)

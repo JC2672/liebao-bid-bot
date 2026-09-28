@@ -25,7 +25,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 MAX_PAGES = 5
 
 
-def fetch_dice(query: str) -> list[RawPosting]:
+def fetch_dice(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
     postings: list[RawPosting] = []
     for page in range(1, MAX_PAGES + 1):
         url = f"https://www.dice.com/jobs?q={quote(query)}&location=United+States&page={page}"

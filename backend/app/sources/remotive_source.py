@@ -31,7 +31,7 @@ def _normalize_location(location: str) -> str:
     return f"Remote - {loc}"
 
 
-def fetch_remotive(query: str) -> list[RawPosting]:
+def fetch_remotive(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
     resp = requests.get(API_URL, headers=HEADERS, params={"search": query}, timeout=20)
     resp.raise_for_status()
     data = resp.json()

@@ -69,7 +69,7 @@ def _card_to_posting(card: dict) -> RawPosting:
     )
 
 
-def fetch_talent(query: str) -> list[RawPosting]:
+def fetch_talent(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter found on this endpoint
     postings: list[RawPosting] = []
     seen_urls: set[str] = set()
 

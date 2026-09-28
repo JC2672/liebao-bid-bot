@@ -27,7 +27,7 @@ def _location(geo: str) -> str:
     return f"Remote - {geo}"
 
 
-def fetch_jobicy(query: str) -> list[RawPosting]:
+def fetch_jobicy(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
     # Jobicy tags are single words (like RemoteOK) - use the query's first
     # word as the tag; a phrase like "Salesforce Administrator" would match
     # nothing as a literal tag.

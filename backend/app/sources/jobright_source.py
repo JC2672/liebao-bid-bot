@@ -76,10 +76,11 @@ def _entry_to_posting(entry: dict) -> RawPosting:
     )
 
 
-def _fetch_anonymous(query: str) -> list[RawPosting]:
+def _fetch_anonymous(query: str, days_ago: int) -> list[RawPosting]:
     resp = requests.get(
         SEARCH_URL, headers=HEADERS, timeout=20,
-        params={"keyword": query, "value": query, "searchType": "job_title", "country": "US"},
+        params={"keyword": query, "value": query, "searchType": "job_title",
+                "country": "US", "daysAgo": days_ago},
     )
     resp.raise_for_status()
     m = NEXT_DATA_RE.search(resp.text)
@@ -89,7 +90,7 @@ def _fetch_anonymous(query: str) -> list[RawPosting]:
     return [_entry_to_posting(e) for e in page_props.get("jobList", [])]
 
 
-def _search_body(query: str, position: int) -> dict:
+def _search_body(query: str, position: int, days_ago: int) -> dict:
     return {
         "searchType": "job_title", "value": query,
         "jobTaxonomyList": [{"taxonomyId": "00-00-00", "title": query}],
@@ -99,11 +100,11 @@ def _search_body(query: str, position: int) -> dict:
         "excludedCompanies": [], "excludedSkills": None, "excludeStaffingAgency": False,
         "minYearsOfExperienceRange": None, "excludeCompanyCategory": [],
         "excludeSecurityClearance": False, "excludeUsCitizen": False,
-        "daysAgo": None, "refresh": True, "position": position, "sortCondition": 0,
+        "daysAgo": days_ago, "refresh": True, "position": position, "sortCondition": 0,
     }
 
 
-def _fetch_authenticated(query: str, cookie_header: str) -> list[RawPosting]:
+def _fetch_authenticated(query: str, cookie_header: str, days_ago: int) -> list[RawPosting]:
     headers = {
         "accept": "application/json, text/plain, */*",
         "content-type": "application/json",
@@ -118,7 +119,7 @@ def _fetch_authenticated(query: str, cookie_header: str) -> list[RawPosting]:
             API_URL,
             params={"searchType": "job_title", "refresh": "true", "count": 20,
                     "position": position, "sortCondition": 0},
-            headers=headers, json=_search_body(query, position), timeout=20,
+            headers=headers, json=_search_body(query, position, days_ago), timeout=20,
         )
         if resp.status_code != 200:
             break
@@ -132,8 +133,19 @@ def _fetch_authenticated(query: str, cookie_header: str) -> list[RawPosting]:
     return postings
 
 
-def fetch_jobright(query: str) -> list[RawPosting]:
+def fetch_jobright(query: str, posted_within_days: int = 7) -> list[RawPosting]:
+    # `daysAgo` is a real server-side recency filter (confirmed live: results
+    # scale sensibly - daysAgo=1 -> ~69 results, daysAgo=7 -> ~1142, daysAgo=30
+    # -> ~2432, for query "Salesforce"). Passing it is the actual fix for a
+    # real bug found live: without it, a fixed ~100-result window (5 pages x
+    # 20, sorted by relevance/default, not date) can miss almost everything
+    # actually posted in the last day, because gates.py's own posted-within-
+    # N-days gate then discards whatever in that window is too old - it
+    # can't recover jobs that were never fetched in the first place. Verified
+    # against a real account: with daysAgo unset, a posted_within_days=1
+    # fetch surfaced only 1 job; with it wired in as below, 17 (workModel
+    # unrestricted) - consistent with a real manual same-day search.
     cookie_header = jobright_session.get_cookie_header()
     if cookie_header and jobright_session.check_session():
-        return _fetch_authenticated(query, cookie_header)
-    return _fetch_anonymous(query)
+        return _fetch_authenticated(query, cookie_header, posted_within_days)
+    return _fetch_anonymous(query, posted_within_days)

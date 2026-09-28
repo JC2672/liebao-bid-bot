@@ -26,7 +26,7 @@ EXPORT_COLUMNS = [
 
 @router.post("", response_model=FetchResponse)
 def run_fetch(req: FetchRequest) -> FetchResponse:
-    postings = fetch_all(req.sources, req.query)
+    postings = fetch_all(req.sources, req.query, req.posted_within_days)
 
     seen: set[str] = set()
     deduped = []

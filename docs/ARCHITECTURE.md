@@ -142,8 +142,14 @@ falling back to Company+Title).
 
 ## Fetch: sources & gates
 
-**Sources** (each behind one `fetch(query) -> RawPosting[]` adapter). None of
-the seventeen need login or an API key - see each module's docstring for how
+**Sources** (each behind one
+`fetch(query, posted_within_days) -> RawPosting[]` adapter - most sources
+ignore `posted_within_days` since gates.py's own recency gate filters
+client-side anyway, but a source whose own API can filter server-side
+should use it: pulling a fixed-size page sorted by relevance/default rather
+than by date can otherwise miss genuinely recent postings entirely if they
+don't also rank high on relevance - a real bug, found live, in Jobright).
+None of the seventeen need login or an API key - see each module's docstring for how
 it was verified, since first impressions (from web search, from a sibling
 local project's own config, or from a site's own published docs) have been
 wrong more than once: Jobright and Jobgether both looked account-gated/
@@ -162,7 +168,7 @@ before being added, not assumed from a doc or another project's config:
 | Remotive | public JSON API | keeps to its own asked rate limit (fetch is on-demand only, never polled) |
 | RemoteOK | public JSON API, plain `requests` | `curl` on Windows hangs against this host (schannel TLS quirk) - `requests`/urllib3 has no such issue. `tags` is an exact single-word match, not free text - first word of the query is used as the tag, falling back to a client-side filter over the general feed if that tag doesn't exist |
 | We Work Remotely | public RSS (combined "all jobs" feed, no keyword param) | |
-| Jobright | plain `requests` - anonymous (`__NEXT_DATA__` JSON) or authenticated (`/swan/recommend/search`), whichever session is available | anonymous: page 1 only (~20 results, no pagination control exists to click, unlike Talent.com), and as of this writing the anonymous search *page* has started showing a Cloudflare "Security check" challenge (confirmed live - it returned clean, rich results earlier in this project; the same request now returns a challenge page). The API endpoint itself is unaffected (confirmed: still returns a clean JSON 401 for a missing/bad session, not a challenge) - see "Login-gated sources" below, now built |
+| Jobright | plain `requests` - anonymous (`__NEXT_DATA__` JSON) or authenticated (`/swan/recommend/search`), whichever session is available | anonymous: page 1 only (~20 results, no pagination control exists to click, unlike Talent.com), and as of this writing the anonymous search *page* has started showing a Cloudflare "Security check" challenge (confirmed live - it returned clean, rich results earlier in this project; the same request now returns a challenge page). The API endpoint itself is unaffected (confirmed: still returns a clean JSON 401 for a missing/bad session, not a challenge) - see "Login-gated sources" below. `posted_within_days` is passed through as `daysAgo`, a genuine server-side recency filter confirmed live (result counts scale sensibly with it: ~69/1142/2432 for 1/7/30 days on a real account) - this was a real bug for a while: without it, results are a fixed-size relevance-sorted window that can miss almost everything actually posted recently, since gates.py's own recency gate can only discard from what was fetched, not recover what wasn't. Caught from a live discrepancy: a `posted_within_days=1` fetch returned 1 result against a manual browser search showing 20+ - fixed, now returns dozens/passes ~60 |
 | Jobgether | **Playwright** (headless Chromium), DOM read | plain requests get HTTP 403 from Cloudflare on this one specifically; a real browser gets through with no login involved |
 | Himalayas | public JSON API, plain `requests` | its `/jobs/api/search?q=` endpoint is documented (in its own OpenAPI spec) but returns a live 404 - confirmed with a cache-busting param to rule out a stale CDN cache. Only `/jobs/api` (browse, cursor-paginated) is actually live, so this pulls a few pages of the most recent postings and filters client-side |
 | Jobicy | public JSON API | `tag` param genuinely filters server-side (unlike RemoteOK's); each job carries a real `jobGeo` field |

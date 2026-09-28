@@ -1,4 +1,13 @@
-"""Source adapters. Each module exposes `fetch(query: str) -> list[RawPosting]`.
+"""Source adapters. Each module exposes
+`fetch(query: str, posted_within_days: int) -> list[RawPosting]`. Most
+sources ignore `posted_within_days` (gates.py's own posted-within-N-days
+gate filters client-side afterward regardless) - it's there for the sources
+whose own API can filter server-side, which matters a lot when a source
+sorts by relevance rather than by date: pulling a fixed-size page of
+"most relevant" results and then discarding old ones client-side can miss
+genuinely recent postings entirely if they don't happen to also rank high
+on relevance. Jobright is a confirmed real case of this - see its module's
+docstring.
 
 Add a new source by adding a module here and registering it in SOURCES below.
 """
@@ -66,14 +75,14 @@ SOURCES: dict[str, callable] = {
 # nothing has needed it so far.
 
 
-def fetch_all(source_names: list[str], query: str) -> list[RawPosting]:
+def fetch_all(source_names: list[str], query: str, posted_within_days: int = 7) -> list[RawPosting]:
     results: list[RawPosting] = []
     for name in source_names:
         fn = SOURCES.get(name)
         if fn is None:
             continue
         try:
-            results.extend(fn(query))
+            results.extend(fn(query, posted_within_days))
         except Exception as exc:  # noqa: BLE001 - one source failing shouldn't kill the fetch
             print(f"[sources] {name} failed: {exc}")
     return results

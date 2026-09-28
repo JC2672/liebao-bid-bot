@@ -34,7 +34,7 @@ def _location(job: dict) -> str:
     return f"Remote - {', '.join(names)}" if names else "Remote"
 
 
-def fetch_himalayas(query: str) -> list[RawPosting]:
+def fetch_himalayas(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
     words = [w for w in query.strip().lower().split() if w]
     postings: list[RawPosting] = []
     cursor = None

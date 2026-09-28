@@ -38,7 +38,7 @@ def _matches_query(job: dict, words: list[str]) -> bool:
     return any(w in text for w in words)
 
 
-def fetch_remoteok(query: str) -> list[RawPosting]:
+def fetch_remoteok(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
     # RemoteOK's `tags` param is an exact match against its own single-word
     # tag vocabulary (e.g. "salesforce"), not a free-text search - a phrase
     # like "Salesforce Administrator" matches no tag at all and silently

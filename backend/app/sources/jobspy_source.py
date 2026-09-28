@@ -40,20 +40,32 @@ def _row_to_posting(source: str, row: pd.Series) -> RawPosting:
     )
 
 
-def _scrape(site_name: str, query: str, location: str = DEFAULT_LOCATION) -> list[RawPosting]:
+def _scrape(
+    site_name: str, query: str, posted_within_days: int, location: str = DEFAULT_LOCATION,
+) -> list[RawPosting]:
+    # `hours_old` asks the site itself to filter by recency, same fix as
+    # Jobright's daysAgo (see jobright_source.py's docstring): without it,
+    # `results_wanted` is a fixed-size slice of whatever the site's own
+    # default sort order is (usually relevance, not date), and gates.py's
+    # posted-within-N-days gate then discards most of it client-side -
+    # genuinely recent postings can be missed entirely if they don't also
+    # rank high on relevance. Not independently verified per-site here the
+    # way Jobright's daysAgo was (each site in JobSpy honors it to varying
+    # degrees), but it's documented JobSpy behavior and can only help.
     df = scrape_jobs(
         site_name=[site_name],
         search_term=query,
         location=location,
         results_wanted=DEFAULT_RESULTS,
         country_indeed="USA",
+        hours_old=posted_within_days * 24,
     )
     if df is None or df.empty:
         return []
     return [_row_to_posting(site_name, row) for _, row in df.iterrows()]
 
 
-def fetch_linkedin(query: str) -> list[RawPosting]:
+def fetch_linkedin(query: str, posted_within_days: int = 7) -> list[RawPosting]:
     # "Remote only" was asked for, but neither achievable lever actually
     # narrows to *US* remote, so this stays on location="United States"
     # rather than trade US onsite/hybrid noise for worldwide noise:
@@ -75,20 +87,20 @@ def fetch_linkedin(query: str) -> list[RawPosting]:
     # option, and jobspy's LinkedIn scraper never populates an `easy_apply`
     # field on scraped results either - there's nothing to filter on
     # after the fact.
-    return _scrape("linkedin", query)
+    return _scrape("linkedin", query, posted_within_days)
 
 
-def fetch_indeed(query: str) -> list[RawPosting]:
-    return _scrape("indeed", query)
+def fetch_indeed(query: str, posted_within_days: int = 7) -> list[RawPosting]:
+    return _scrape("indeed", query, posted_within_days)
 
 
-def fetch_zip_recruiter(query: str) -> list[RawPosting]:
-    return _scrape("zip_recruiter", query)
+def fetch_zip_recruiter(query: str, posted_within_days: int = 7) -> list[RawPosting]:
+    return _scrape("zip_recruiter", query, posted_within_days)
 
 
-def fetch_glassdoor(query: str) -> list[RawPosting]:
-    return _scrape("glassdoor", query)
+def fetch_glassdoor(query: str, posted_within_days: int = 7) -> list[RawPosting]:
+    return _scrape("glassdoor", query, posted_within_days)
 
 
-def fetch_google(query: str) -> list[RawPosting]:
-    return _scrape("google", query)
+def fetch_google(query: str, posted_within_days: int = 7) -> list[RawPosting]:
+    return _scrape("google", query, posted_within_days)

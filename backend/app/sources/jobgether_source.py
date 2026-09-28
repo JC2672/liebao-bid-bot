@@ -87,7 +87,7 @@ def _normalize_location(location: str) -> str:
     return f"Remote - {loc}"
 
 
-def fetch_jobgether(query: str) -> list[RawPosting]:
+def fetch_jobgether(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter found on this endpoint
     postings: list[RawPosting] = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)

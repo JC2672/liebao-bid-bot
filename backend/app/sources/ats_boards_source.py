@@ -142,13 +142,13 @@ def _fan_out(tokens: list[str], fetch_one) -> list[RawPosting]:
     return postings
 
 
-def fetch_greenhouse(query: str) -> list[RawPosting]:  # noqa: ARG001 - fan-out, no query param
+def fetch_greenhouse(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - fan-out, no query or date param
     return _fan_out(GREENHOUSE_BOARDS, _fetch_greenhouse_one)
 
 
-def fetch_lever(query: str) -> list[RawPosting]:  # noqa: ARG001
+def fetch_lever(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001
     return _fan_out(LEVER_BOARDS, _fetch_lever_one)
 
 
-def fetch_ashby(query: str) -> list[RawPosting]:  # noqa: ARG001
+def fetch_ashby(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001
     return _fan_out(ASHBY_BOARDS, _fetch_ashby_one)
