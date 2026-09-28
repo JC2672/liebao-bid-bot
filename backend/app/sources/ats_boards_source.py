@@ -4,12 +4,20 @@ search: each is one call per company's own board (`boards-api.greenhouse.io`,
 `api.lever.co`, `api.ashbyhq.com`), so getting broad coverage means fanning
 out over a list of companies rather than one query.
 
-`query` is intentionally unused, same as We Work Remotely - gates.py's title/
-description relevance filter is what actually decides Salesforce relevance
-here, run over every job every company in the list has open (any company
-large enough to run its own Salesforce business-systems team can have a
-"Salesforce Administrator" opening, whether or not the company itself has
-anything to do with Salesforce as a product).
+`query` is intentionally unused - checked live (2026-09-28) whether any of
+the three APIs honor a search-shaped param at all: `search`/`q`/`query`/
+`title` on Greenhouse's boards-api all silently returned the identical
+702-job list for a real board (Stripe), regardless of value. Unlike
+Jobright, there's no server-side lever here whatsoever - these are pure
+per-company job listings, so title/location/remote filtering happens
+entirely client-side below, same pattern as Arbeitnow/RemoteOK/Working
+Nomads. Without it, the noise looks a lot like Jobright's pre-fix problem:
+of ~8,900 Greenhouse jobs fanned out across every company, only ~31 even
+have a Salesforce-relevant title, and most of those are non-US offices
+(Bangalore, Gurugram, Warsaw, Poland, Norway...) or don't say "remote" at
+all - filtering that out here, not just downstream in gates.py, keeps the
+adapter's own output (and the UI showing it) from being dominated by
+postings that were never going to be relevant.
 
 COMPANY_BOARDS below is NOT copied from any other project - every single
 token was verified live (HTTP 200, non-empty job list) before being added.
@@ -25,10 +33,27 @@ from datetime import datetime
 
 import requests
 
+from ..gates import REMOTE_NON_US_RE, REMOTE_RE, _is_salesforce_relevant
 from ..models import RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 MAX_WORKERS = 16
+
+
+def _is_relevant(posting: RawPosting) -> bool:
+    # Title relevance reuses gates.py's own check rather than a second copy
+    # of the regex, so the two can't silently drift apart. Location is
+    # stricter than gates.py's general US-or-remote gate: bare "United
+    # States" with no "remote" qualifier is ambiguous (could be onsite),
+    # and per the user's ask this fan-out should keep to Remote specifically
+    # - "United States, Remote"/"-REMOTE, USA-"/"Remote - USA" style values
+    # observed live all still match REMOTE_RE.
+    if not _is_salesforce_relevant(posting):
+        return False
+    loc = posting.location or ""
+    if REMOTE_NON_US_RE.search(loc):
+        return False
+    return bool(REMOTE_RE.search(loc))
 
 # Verified live (2026-09-27): each token below returned a real, non-empty
 # job list at the time of checking. Extend freely, but verify new entries
@@ -64,7 +89,7 @@ def _fetch_greenhouse_one(token: str) -> list[RawPosting]:
                 posted_at = datetime.fromisoformat(job["updated_at"])
             except ValueError:
                 posted_at = None
-        postings.append(RawPosting(
+        posting = RawPosting(
             source="greenhouse", external_id=str(job.get("id", "")),
             url=job.get("absolute_url", ""),
             company=job.get("company_name", token),
@@ -72,7 +97,9 @@ def _fetch_greenhouse_one(token: str) -> list[RawPosting]:
             location=(job.get("location") or {}).get("name", ""),
             description=job.get("content", ""),
             posted_at=posted_at,
-        ))
+        )
+        if _is_relevant(posting):
+            postings.append(posting)
     return postings
 
 
@@ -90,12 +117,14 @@ def _fetch_lever_one(token: str) -> list[RawPosting]:
         if job.get("createdAt"):
             posted_at = datetime.fromtimestamp(job["createdAt"] / 1000)
         location = categories.get("location") or job.get("country") or ""
-        postings.append(RawPosting(
+        posting = RawPosting(
             source="lever", external_id=str(job.get("id", "")),
             url=job.get("hostedUrl", ""), company=token, title=job.get("text", ""),
             location=location, description=job.get("descriptionPlain", ""),
             posted_at=posted_at,
-        ))
+        )
+        if _is_relevant(posting):
+            postings.append(posting)
     return postings
 
 
@@ -116,12 +145,14 @@ def _fetch_ashby_one(token: str) -> list[RawPosting]:
         location = job.get("location", "")
         if job.get("isRemote"):
             location = f"Remote - {location}" if location else "Remote"
-        postings.append(RawPosting(
+        posting = RawPosting(
             source="ashby", external_id=str(job.get("id", "")),
             url=job.get("jobUrl") or job.get("applyUrl", ""), company=token,
             title=job.get("title", ""), location=location,
             description=job.get("descriptionPlain", ""), posted_at=posted_at,
-        ))
+        )
+        if _is_relevant(posting):
+            postings.append(posting)
     return postings
 
 

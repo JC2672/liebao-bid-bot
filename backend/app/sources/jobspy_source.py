@@ -19,6 +19,16 @@ DEFAULT_LOCATION = "United States"
 DEFAULT_RESULTS = 50
 
 
+def _str(row: pd.Series, key: str) -> str:
+    # `row.get(key) or ""` doesn't catch pandas NaN - float('nan') is
+    # truthy in Python, so `str(nan)` silently produces the literal string
+    # "nan" (seen live in Indeed's `company` column). pd.isna() first.
+    value = row.get(key)
+    if value is None or pd.isna(value):
+        return ""
+    return str(value)
+
+
 def _row_to_posting(source: str, row: pd.Series) -> RawPosting:
     posted_at = row.get("date_posted")
     if isinstance(posted_at, str):
@@ -31,13 +41,13 @@ def _row_to_posting(source: str, row: pd.Series) -> RawPosting:
 
     return RawPosting(
         source=source,
-        external_id=str(row.get("id") or row.get("job_url") or row.get("title")),
-        url=str(row.get("job_url") or ""),
-        company=str(row.get("company") or ""),
-        title=str(row.get("title") or ""),
-        location=str(row.get("location") or ""),
+        external_id=_str(row, "id") or _str(row, "job_url") or _str(row, "title"),
+        url=_str(row, "job_url"),
+        company=_str(row, "company"),
+        title=_str(row, "title"),
+        location=_str(row, "location"),
         is_remote=bool(row.get("is_remote")) if not pd.isna(row.get("is_remote")) else None,
-        description=str(row.get("description") or ""),
+        description=_str(row, "description"),
         posted_at=posted_at,
     )
 
