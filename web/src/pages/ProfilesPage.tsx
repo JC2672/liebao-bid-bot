@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail, MapPin, Phone, Linkedin as LinkedinIcon } from "lucide-react";
 import {
   createProfile,
   deleteProfile,
@@ -12,78 +11,6 @@ import {
   type ProfileInput,
 } from "../lib/api";
 import { Button, Card } from "../components/ui";
-
-function linkedinHref(value: string) {
-  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
-}
-
-function ProfileCard({
-  profile,
-  onEdit,
-  onDelete,
-  deletePending,
-}: {
-  profile: Profile;
-  onEdit: () => void;
-  onDelete: () => void;
-  deletePending: boolean;
-}) {
-  return (
-    <Card className="flex flex-col gap-3 p-4">
-      <div className="font-medium">{profile.name}</div>
-
-      <div className="flex flex-col gap-1.5 text-sm text-fg-muted">
-        {profile.location && (
-          <div className="flex items-center gap-2">
-            <MapPin size={14} className="shrink-0" />
-            <span className="truncate">{profile.location}</span>
-          </div>
-        )}
-        {profile.phone && (
-          <div className="flex items-center gap-2">
-            <Phone size={14} className="shrink-0" />
-            <span className="truncate">{profile.phone}</span>
-          </div>
-        )}
-        {profile.email && (
-          <div className="flex items-center gap-2">
-            <Mail size={14} className="shrink-0" />
-            <span className="truncate">{profile.email}</span>
-          </div>
-        )}
-        {profile.linkedin && (
-          <div className="flex items-center gap-2">
-            <LinkedinIcon size={14} className="shrink-0" />
-            <a
-              href={linkedinHref(profile.linkedin)}
-              target="_blank"
-              rel="noreferrer"
-              className="truncate hover:text-accent hover:underline"
-            >
-              {profile.linkedin}
-            </a>
-          </div>
-        )}
-        {!profile.location && !profile.phone && !profile.email && !profile.linkedin && (
-          <span className="text-fg-muted/70">No contact details set</span>
-        )}
-      </div>
-
-      <div className="font-mono text-[11px] text-fg-muted">
-        Sheet tab: {profile.sheet_tab || "—"} · {profile.output_root || "no output folder set"}
-      </div>
-
-      <div className="mt-auto flex gap-2 pt-1">
-        <Button variant="secondary" onClick={onEdit}>
-          Edit
-        </Button>
-        <Button variant="danger" disabled={deletePending} onClick={onDelete}>
-          Delete
-        </Button>
-      </div>
-    </Card>
-  );
-}
 
 const EMPTY_FORM: ProfileInput = {
   name: "",
@@ -196,41 +123,55 @@ export function ProfilesPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Profiles</h2>
-        <Button variant="primary" onClick={startCreate}>
-          + New Profile
-        </Button>
-      </div>
-
-      {profilesQuery.data?.length === 0 ? (
-        <Card className="p-8 text-center text-sm text-fg-muted">
-          No profiles yet. Create one to start fetching and generating for it.
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {profilesQuery.data?.map((p) => (
-            <ProfileCard
-              key={p.id}
-              profile={p}
-              onEdit={() => startEdit(p)}
-              deletePending={deleteMutation.isPending}
-              onDelete={() => {
-                if (confirm(`Delete profile "${p.name}"? This cannot be undone.`)) {
-                  deleteMutation.mutate(p.id);
-                }
-              }}
-            />
-          ))}
+      <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Profiles</h2>
+          <Button variant="primary" onClick={startCreate}>
+            + New Profile
+          </Button>
         </div>
-      )}
 
-      {deleteMutation.isError && (
-        <p className="text-sm text-bad">
-          {(deleteMutation.error as { response?: { data?: { detail?: string } } })?.response
-            ?.data?.detail ?? "Failed to delete profile."}
-        </p>
-      )}
+        <div className="flex flex-col divide-y divide-border">
+          {profilesQuery.data?.map((p) => (
+            <div key={p.id} className="flex items-center justify-between py-2.5">
+              <div>
+                <div className="font-medium">{p.name}</div>
+                <div className="font-mono text-xs text-fg-muted">
+                  Sheet tab: {p.sheet_tab || "—"} · {p.output_root || "no output folder set"}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => startEdit(p)}>
+                  Edit
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => {
+                    if (confirm(`Delete profile "${p.name}"? This cannot be undone.`)) {
+                      deleteMutation.mutate(p.id);
+                    }
+                  }}
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          ))}
+          {profilesQuery.data?.length === 0 && (
+            <p className="py-8 text-center text-sm text-fg-muted">
+              No profiles yet. Create one to start fetching and generating for it.
+            </p>
+          )}
+        </div>
+
+        {deleteMutation.isError && (
+          <p className="mt-2 text-sm text-bad">
+            {(deleteMutation.error as { response?: { data?: { detail?: string } } })?.response
+              ?.data?.detail ?? "Failed to delete profile."}
+          </p>
+        )}
+      </Card>
 
       {isOpen && (
         <Card className="p-4">
