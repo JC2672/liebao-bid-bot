@@ -23,6 +23,7 @@ from . import (
     jobgether_source,
     jobicy_source,
     jobright_source,
+    jobspresso_source,
     jobspy_source,
     remoteok_source,
     remotive_source,
@@ -49,6 +50,7 @@ SOURCES: dict[str, callable] = {
     "ashby": ats_boards_source.fetch_ashby,
     "talent": talent_source.fetch_talent,
     "builtin": builtin_source.fetch_builtin,
+    "jobspresso": jobspresso_source.fetch_jobspresso,
 }
 
 # The Muse: investigated and NOT integrated. Its public API has no free-text

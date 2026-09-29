@@ -5,6 +5,32 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+}
+
+
+def parse_month_day(text: str) -> datetime | None:
+    """"October 20", no year given (Jobspresso) -> UTC datetime. Infers the
+    year: a month/day that hasn't happened yet this year must be from last
+    year (job postings are never future-dated), otherwise this year."""
+    m = re.match(r"([A-Za-z]+)\s+(\d{1,2})$", text.strip())
+    if not m:
+        return None
+    month = _MONTHS.get(m.group(1).lower())
+    if month is None:
+        return None
+    day = int(m.group(2))
+    now = datetime.now(timezone.utc)
+    try:
+        candidate = datetime(now.year, month, day, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    if candidate > now:
+        candidate = candidate.replace(year=now.year - 1)
+    return candidate
+
 
 def parse_relative_date(text: str) -> datetime | None:
     """'Today', 'Yesterday', 'X days ago', 'X+ days ago' -> UTC datetime.
