@@ -41,23 +41,32 @@ function TemplateCard({
       </div>
 
       {/* Scaled-down live preview (sample data, not a real profile) - lets you
-          eyeball a template's look without opening the PDF for every tweak. */}
+          eyeball a template's look without opening the PDF for every tweak.
+          The frame is a real US Letter ratio (8.5:11), not an arbitrary box -
+          the iframe renders at Letter's actual pixel size (96dpi: 816x1056)
+          and scales itself down to fit via a container-query unit, so it
+          stays paper-shaped at any card width instead of a fixed px height
+          that only happened to fit one column count. */}
       <a
         href={templatePreviewUrl(template.id, "pdf")}
         target="_blank"
         rel="noreferrer"
-        className="block overflow-hidden rounded border border-border"
+        className="relative block w-full overflow-hidden rounded border border-border bg-white"
+        style={{ aspectRatio: "8.5 / 11", containerType: "inline-size" }}
         title="Open full PDF preview"
       >
-        <div className="pointer-events-none h-56 w-full overflow-hidden bg-white">
-          <iframe
-            src={templatePreviewUrl(template.id, "html")}
-            title={`${template.name} preview`}
-            className="h-[224%] w-[224%] origin-top-left"
-            style={{ transform: "scale(0.4465)" }}
-            tabIndex={-1}
-          />
-        </div>
+        <iframe
+          src={templatePreviewUrl(template.id, "html")}
+          title={`${template.name} preview`}
+          tabIndex={-1}
+          className="pointer-events-none"
+          style={{
+            width: "816px",
+            height: "1056px",
+            transform: "scale(calc(100cqw / 816px))",
+            transformOrigin: "top left",
+          }}
+        />
       </a>
     </Card>
   );
