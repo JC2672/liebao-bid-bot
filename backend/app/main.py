@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import sys
 from typing import Annotated
 
 from fastapi import FastAPI, Query
@@ -9,6 +11,18 @@ from . import generation
 from .db import init_db
 from .native import pick_folder
 from .routers import fetch, jobright_session, profiles, queue, templates
+
+# Playwright's async API launches the browser via a real OS subprocess,
+# which asyncio's SelectorEventLoop cannot do on Windows at all - it raises
+# a bare `NotImplementedError` with no other detail the moment a subprocess
+# is requested, which is exactly what a Generate click hit live (confirmed
+# with the user: no Chrome window ever opened, just this error on all three
+# rows). `--reload` (see start.bat) is the trigger: its reload subprocess
+# doesn't inherit Python 3.8+'s own Proactor-by-default policy on Windows,
+# so this has to be forced explicitly, as early as possible in the actual
+# worker process uvicorn --reload restarts on every file save.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 app = FastAPI(title="liebao-bid-bot")
 
