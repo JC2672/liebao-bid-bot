@@ -76,8 +76,6 @@ export interface Opportunity {
 export const SOURCE_OPTIONS = [
   { id: "linkedin", label: "LinkedIn", domain: "linkedin.com" },
   { id: "indeed", label: "Indeed", domain: "indeed.com" },
-  { id: "zip_recruiter", label: "ZipRecruiter", domain: "ziprecruiter.com" },
-  { id: "glassdoor", label: "Glassdoor", domain: "glassdoor.com" },
   { id: "google", label: "Google Jobs", domain: "google.com" },
   { id: "dice", label: "Dice", domain: "dice.com" },
   { id: "remotive", label: "Remotive", domain: "remotive.com" },

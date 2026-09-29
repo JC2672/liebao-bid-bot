@@ -1,8 +1,14 @@
-"""Adapter over python-jobspy, covering LinkedIn/Indeed/ZipRecruiter/Glassdoor/Google.
+"""Adapter over python-jobspy, covering LinkedIn/Indeed/Google.
 
 JobSpy is unofficial (it scrapes aggregator sites), so results can be flaky and
 rate-limited. Each function below is a thin, source-scoped wrapper so the rest
 of the app never touches jobspy's DataFrame directly.
+
+ZipRecruiter and Glassdoor support was removed (2026-09-29): both now return
+0 results, and both are genuinely Cloudflare-walled (confirmed live with a
+real headless browser: "Humans only" on Glassdoor, "Just a moment..." on
+ZipRecruiter), not just broken JobSpy internals - see docs/ARCHITECTURE.md's
+"Investigated and not integrated" section for the full writeup.
 """
 from __future__ import annotations
 
@@ -148,14 +154,6 @@ def fetch_indeed(query: str, posted_within_days: int = 7) -> list[RawPosting]:  
                 seen_urls.add(posting.url)
                 postings.append(posting)
     return postings
-
-
-def fetch_zip_recruiter(query: str, posted_within_days: int = 7) -> list[RawPosting]:
-    return _scrape("zip_recruiter", query, posted_within_days)
-
-
-def fetch_glassdoor(query: str, posted_within_days: int = 7) -> list[RawPosting]:
-    return _scrape("glassdoor", query, posted_within_days)
 
 
 def fetch_google(query: str, posted_within_days: int = 7) -> list[RawPosting]:
