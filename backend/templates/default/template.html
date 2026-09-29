@@ -19,6 +19,11 @@
     line-height: 1.42;
     color: var(--ink);
     margin: 0;
+    /* Page margin lives here, not in Playwright's page.pdf() margin option,
+       so a plain HTML preview (the Templates tab's card/iframe) actually
+       matches the real PDF instead of showing content flush to the edges -
+       resume_render.render_pdf() passes margin=0 for exactly this reason. */
+    padding: 0.6in 0.65in;
   }
 
   .name {

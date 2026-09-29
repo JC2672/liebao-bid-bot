@@ -85,10 +85,10 @@ def render_pdf(html: str) -> bytes:
         try:
             page = browser.new_page()
             page.set_content(html, wait_until="networkidle")
-            return page.pdf(
-                format="Letter",
-                print_background=True,
-                margin={"top": "0.55in", "bottom": "0.55in", "left": "0.6in", "right": "0.6in"},
-            )
+            # margin=0: page spacing is the template's own responsibility
+            # (its `body` padding), not this call's - see the default
+            # template's CSS comment. That way a plain HTML preview matches
+            # the real PDF instead of only getting margins at export time.
+            return page.pdf(format="Letter", print_background=True, margin={"top": "0", "bottom": "0", "left": "0", "right": "0"})
         finally:
             browser.close()
