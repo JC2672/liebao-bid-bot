@@ -89,14 +89,12 @@ about the rest of the system (generation, staging, Output Root) has to change:
   "sheet_id": "",                     // Google Sheet ID (optional until Applied is used)
   "sheet_tab": "Firstname",           // tab name in that Sheet
   "output_root": "F:/Applications/Firstname",
-  "template": "template.html"
+  "template_id": "default"            // live reference into templates/ - see below
 }
 ```
-Plus `prompt.md` (the tailoring prompt, JD gets appended) and `template.html`
-(the resume layout for this profile — starts as a copy of the shared
-`profiles/_default_template.html` on creation, then can be customized
-per-profile). Deleting a profile is blocked while it still has opportunities
-in the SQLite queue, to avoid silently orphaning in-flight work.
+Plus `prompt.md` (the tailoring prompt, JD gets appended). Deleting a
+profile is blocked while it still has opportunities in the SQLite queue, to
+avoid silently orphaning in-flight work.
 
 Deliberately no `title` field here: a resume's headline title varies per JD
 and is already generated per-opportunity (see the resume JSON schema below),
@@ -104,6 +102,47 @@ so a fixed per-profile one would just be redundant/stale. `output_root` is
 never hand-typed either - the Profiles screen's "Browse…" button opens a
 native OS folder picker (`POST /pick-folder`) and fills in the real path,
 since a browser's own picker can't hand back an absolute filesystem path.
+
+### Templates — `templates/<id>/` (independent of Profiles)
+
+Templates are their own entity, managed from a **Templates screen** exactly
+like Profiles are - not owned by any one profile. A profile references one
+by id (`Profile.template_id`), and that reference is *live*, not a
+snapshot: editing a template changes what every profile using it renders on
+its next generation, with no per-profile copy to keep in sync. This
+replaced an earlier shape where each profile got its own `template.html`,
+seeded from a shared default on creation - real friction the moment you
+want to improve the design once and have it apply everywhere, and pure
+accident anyway: the template only ever needed `resume_json` plus the
+profile's contact fields at render time, never anything profile-specific
+baked into the file itself.
+
+```
+templates/<id>/
+  template.json   # { "id": "...", "name": "..." }
+  template.html   # Jinja2 source, see resume_render.py
+```
+
+`GET /templates/<id>/preview.html` and `.../preview.pdf` render a template
+against fixed sample data (`resume_render.SAMPLE_CONTACT` +
+`SAMPLE_RESUME_JSON`), so a template can be designed and previewed without
+Phase 3's ChatGPT engine existing yet - the Templates screen's card grid
+embeds the HTML preview live (scaled down) and links out to the full PDF.
+PDF rendering reuses Playwright (already a dependency for the Jobgether/
+Talent.com sources): render the Jinja2 HTML, `page.set_content()`, then
+`page.pdf()` with Letter-size margins - the same "render HTML, print it"
+shape as a real generation will eventually use, just against sample data
+instead of a real opportunity. Deleting a template is blocked while any
+profile still references it (mirrors the opportunities-in-queue guard on
+deleting a profile).
+
+One real Jinja2 gotcha hit building the default template: `{{ s.items }}`
+on a skills entry silently returned `dict.items`' bound method instead of
+the `"items"` key's value, since Jinja2's attribute lookup tries `getattr`
+before `__getitem__` and `dict` has a real `.items` method. Fixed with
+bracket access (`{{ s['items'] }}`) rather than renaming the schema field -
+worth knowing before adding more dict-shaped fields to the resume JSON
+schema below, since `keys`/`values`/`get` are the same trap.
 
 ### Resume JSON schema (LLM output contract)
 

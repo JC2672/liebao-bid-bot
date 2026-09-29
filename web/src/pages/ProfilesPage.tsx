@@ -6,6 +6,7 @@ import {
   deleteProfile,
   getProfile,
   listProfiles,
+  listTemplates,
   pickFolder,
   updateProfile,
   type Profile,
@@ -97,6 +98,7 @@ const EMPTY_FORM: ProfileInput = {
   sheet_id: "",
   sheet_tab: "",
   output_root: "",
+  template_id: "default",
   prompt: "",
 };
 
@@ -132,6 +134,7 @@ export function ProfilesPage() {
   const [pickingFolder, setPickingFolder] = useState(false);
 
   const profilesQuery = useQuery({ queryKey: ["profiles"], queryFn: listProfiles });
+  const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: listTemplates });
 
   const createMutation = useMutation({
     mutationFn: (input: ProfileInput) => createProfile(input),
@@ -160,6 +163,7 @@ export function ProfilesPage() {
       name: detail.name, location: detail.location,
       phone: detail.phone, email: detail.email, linkedin: detail.linkedin,
       sheet_id: detail.sheet_id, sheet_tab: detail.sheet_tab, output_root: detail.output_root,
+      template_id: detail.template_id,
       prompt: detail.prompt,
     });
     setEditingId(p.id);
@@ -265,6 +269,21 @@ export function ProfilesPage() {
                   {pickingFolder ? "Waiting…" : "Browse…"}
                 </Button>
               </div>
+            </label>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs text-fg-muted">Template</span>
+              <select
+                value={form.template_id}
+                onChange={(e) => setForm({ ...form, template_id: e.target.value })}
+                className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
+              >
+                {templatesQuery.data?.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 

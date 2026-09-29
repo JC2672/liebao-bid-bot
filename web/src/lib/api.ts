@@ -35,7 +35,7 @@ export interface Profile {
   sheet_id: string;
   sheet_tab: string;
   output_root: string;
-  template: string;
+  template_id: string;
 }
 
 export interface ProfileDetail extends Profile {
@@ -51,7 +51,25 @@ export interface ProfileInput {
   sheet_id: string;
   sheet_tab: string;
   output_root: string;
+  template_id: string;
   prompt: string;
+}
+
+// Templates are independent of Profiles - a profile just references one by
+// id (Profile.template_id), a live reference not a copy: editing a template
+// changes what every profile using it renders next. See templates.py.
+export interface Template {
+  id: string;
+  name: string;
+}
+
+export interface TemplateDetail extends Template {
+  html: string;
+}
+
+export interface TemplateInput {
+  name: string;
+  html: string;
 }
 
 export type OpportunityStatus = "queued" | "generating" | "ready" | "failed";
@@ -148,6 +166,34 @@ export async function updateProfile(id: string, input: ProfileInput) {
 
 export async function deleteProfile(id: string) {
   await api.delete(`/profiles/${id}`);
+}
+
+export async function listTemplates() {
+  const { data } = await api.get<Template[]>("/templates");
+  return data;
+}
+
+export async function getTemplate(id: string) {
+  const { data } = await api.get<TemplateDetail>(`/templates/${id}`);
+  return data;
+}
+
+export async function createTemplate(input: TemplateInput) {
+  const { data } = await api.post<Template>("/templates", input);
+  return data;
+}
+
+export async function updateTemplate(id: string, input: TemplateInput) {
+  const { data } = await api.put<Template>(`/templates/${id}`, input);
+  return data;
+}
+
+export async function deleteTemplate(id: string) {
+  await api.delete(`/templates/${id}`);
+}
+
+export function templatePreviewUrl(id: string, format: "html" | "pdf") {
+  return `${api.defaults.baseURL}/templates/${id}/preview.${format}`;
 }
 
 export async function pickFolder(description: string) {

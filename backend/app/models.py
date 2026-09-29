@@ -91,7 +91,10 @@ class Profile(BaseModel):
     sheet_id: str = ""
     sheet_tab: str
     output_root: str
-    template: str = "template.html"
+    # A live reference to templates/<template_id>/, not a per-profile copy -
+    # editing that template changes what every profile using it renders next,
+    # with no per-profile file to keep in sync. See templates.py.
+    template_id: str = "default"
 
 
 class ProfileDetail(Profile):
@@ -114,4 +117,26 @@ class ProfileInput(BaseModel):
     sheet_id: str = ""
     sheet_tab: str
     output_root: str
+    template_id: str = "default"
     prompt: str = ""
+
+
+class Template(BaseModel):
+    id: str  # slug, matches the templates/<id>/ directory name
+    name: str  # display name, shown in the Templates tab and Profile's picker
+
+
+class TemplateDetail(Template):
+    """Template plus its raw Jinja2 HTML source, for the edit form. GET-only shape."""
+
+    html: str = ""
+
+
+class TemplateInput(BaseModel):
+    """Body for creating/updating a template from the UI. `id` is only read
+    on create (path param is authoritative on update) and must be a
+    filesystem-safe slug: lowercase letters, digits, hyphens."""
+
+    id: str = ""
+    name: str
+    html: str

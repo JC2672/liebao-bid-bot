@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
 from .native import pick_folder
-from .routers import fetch, jobright_session, profiles, queue
+from .routers import fetch, jobright_session, profiles, queue, templates
 
 app = FastAPI(title="liebao-bid-bot")
 
@@ -23,6 +23,7 @@ app.add_middleware(
 app.include_router(fetch.router)
 app.include_router(queue.router)
 app.include_router(profiles.router)
+app.include_router(templates.router)
 app.include_router(jobright_session.router)
 
 

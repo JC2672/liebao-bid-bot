@@ -3,16 +3,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FetchPage } from "./pages/FetchPage";
 import { QueuePage } from "./pages/QueuePage";
 import { ProfilesPage } from "./pages/ProfilesPage";
+import { TemplatesPage } from "./pages/TemplatesPage";
 import { ThemeToggle } from "./components/ThemeToggle";
 
 const queryClient = new QueryClient();
 
-type Tab = "fetch" | "queue" | "profiles";
+type Tab = "fetch" | "queue" | "profiles" | "templates";
 
 const TABS: [Tab, string][] = [
   ["fetch", "Fetch"],
   ["queue", "Queue"],
   ["profiles", "Profiles"],
+  ["templates", "Templates"],
 ];
 
 function App() {
@@ -67,6 +69,9 @@ function App() {
           </div>
           <div hidden={tab !== "profiles"}>
             <ProfilesPage />
+          </div>
+          <div hidden={tab !== "templates"}>
+            <TemplatesPage />
           </div>
         </main>
       </div>

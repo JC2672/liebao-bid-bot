@@ -3,12 +3,15 @@
 Job-application assistant for US/Remote Salesforce roles. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
-Status: **Phase 1** — Fetch screen (10 sources, hard gates, XLSX export),
-Queue screen (import shortlist, bulk/single Applied/Remove/Retry, Sheet
-logging), and a Profiles screen (create/edit/delete, no hand-edited files)
-are wired up. The ChatGPT-web generation engine (Phase 3) is not yet built,
-so queued opportunities currently stay at `queued` — there's no PDF pipeline
-running against them yet.
+Status: **Phase 1 done, Phase 2 in progress** — Fetch screen (18 sources,
+hard gates, XLSX export), Queue screen (import shortlist, bulk/single
+Applied/Remove/Retry, Sheet logging), a Profiles screen, and a Templates
+screen (resume layouts, independent of Profiles - a profile just
+references one live, see docs/ARCHITECTURE.md) are wired up. The ChatGPT-web
+generation engine (Phase 3) is not yet built, so queued opportunities
+currently stay at `queued` — there's no PDF pipeline running against them
+yet, though `GET /templates/<id>/preview.pdf` renders a template against
+sample data so the design can be built and checked ahead of that.
 
 ## Quick start
 
@@ -46,14 +49,20 @@ unpacked). See `extension/README.md`. Without it, Jobright still works, just
 capped at anonymous-only results (~20, and currently sometimes blocked by a
 Cloudflare challenge Jobright added to its anonymous page).
 
-### Profiles
+### Profiles and Templates
 
 Create profiles from the app's **Profiles** tab (name, contact info, output
-folder via the Browse button, Google Sheet tab, and the resume-tailoring
-prompt) — nothing here is hand-edited or hardcoded. Each still persists to
-`backend/profiles/<id>/` on disk (`profile.json`, `prompt.md`, `template.html`,
-the last starting as a copy of `profiles/_default_template.html`), so the
-files are there to inspect or back up, just not meant to be edited by hand.
+folder via the Browse button, Google Sheet tab, which **Template** it uses,
+and the resume-tailoring prompt) — nothing here is hand-edited or
+hardcoded. Each persists to `backend/profiles/<id>/` on disk (`profile.json`,
+`prompt.md`), so the files are there to inspect or back up, just not meant
+to be edited by hand.
+
+Templates are managed independently from the **Templates** tab (resume
+layout, Jinja2 HTML) and persist to `backend/templates/<id>/`. A profile's
+`template_id` is a live reference, not a copy - editing a template changes
+what every profile using it renders next. A "Default" template ships out
+of the box.
 
 ### Google Sheets (optional until you start using Applied)
 

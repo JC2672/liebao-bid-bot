@@ -17,8 +17,8 @@ data/
 *.db-journal
 
 # Real profiles (name, email, phone, your actual resume prompt) - personal
-# data, never committed. _default_template.html is shared, non-personal, and
-# stays tracked.
+# data, never committed. Templates live separately under backend/templates/
+# (shared, non-personal design assets) and stay tracked.
 backend/profiles/*/
 
 # Secrets / config

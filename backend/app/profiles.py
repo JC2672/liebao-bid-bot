@@ -2,7 +2,11 @@
 files - but each still lives on disk at backend/profiles/<id>/ as:
   - profile.json  (structured fields, this module's Profile model)
   - prompt.md      (the tailoring prompt; JD gets appended at generation time)
-  - template.html  (resume layout; starts as a copy of _default_template.html)
+
+A profile's resume layout is a *live reference* to a Template (see
+templates.py), stored as Profile.template_id - not a file owned by the
+profile. Editing that template changes what every profile using it renders
+next, with no per-profile template.html to keep in sync.
 
 Profiles are separate identities, not variants of one person - see
 docs/ARCHITECTURE.md.
@@ -17,7 +21,6 @@ from pathlib import Path
 from .models import Profile, ProfileDetail, ProfileInput
 
 PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
-DEFAULT_TEMPLATE = PROFILES_DIR / "_default_template.html"
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
@@ -66,10 +69,6 @@ def get_prompt(profile_id: str) -> str:
     return f.read_text(encoding="utf-8") if f.exists() else ""
 
 
-def get_template_path(profile: Profile) -> Path:
-    return _dir(profile.id) / profile.template
-
-
 def _write(profile: Profile, prompt: str) -> None:
     d = _dir(profile.id)
     d.mkdir(parents=True, exist_ok=True)
@@ -77,9 +76,6 @@ def _write(profile: Profile, prompt: str) -> None:
         json.dumps(profile.model_dump(), indent=2), encoding="utf-8"
     )
     (d / "prompt.md").write_text(prompt, encoding="utf-8")
-    template_path = d / profile.template
-    if not template_path.exists():
-        shutil.copyfile(DEFAULT_TEMPLATE, template_path)
 
 
 def create_profile(data: ProfileInput) -> Profile:
@@ -92,6 +88,7 @@ def create_profile(data: ProfileInput) -> Profile:
         id=profile_id, name=data.name, location=data.location,
         phone=data.phone, email=data.email, linkedin=data.linkedin,
         sheet_id=data.sheet_id, sheet_tab=data.sheet_tab, output_root=data.output_root,
+        template_id=data.template_id,
     )
     _write(profile, data.prompt)
     return profile
@@ -100,12 +97,11 @@ def create_profile(data: ProfileInput) -> Profile:
 def update_profile(profile_id: str, data: ProfileInput) -> Profile:
     if not _dir(profile_id).exists():
         raise FileNotFoundError(f"No profile '{profile_id}'")
-    existing = get_profile(profile_id)  # keeps `template` filename stable
     updated = Profile(
         id=profile_id, name=data.name, location=data.location,
         phone=data.phone, email=data.email, linkedin=data.linkedin,
         sheet_id=data.sheet_id, sheet_tab=data.sheet_tab, output_root=data.output_root,
-        template=existing.template,
+        template_id=data.template_id,
     )
     _write(updated, data.prompt)
     return updated

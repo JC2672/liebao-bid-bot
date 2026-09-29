@@ -1,0 +1,195 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: Letter; margin: 0; }
+
+  :root {
+    --ink: #1c1a17;
+    --muted: #5b564d;
+    --rule: #c7c0b0;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: Calibri, "Segoe UI", Arial, sans-serif;
+    font-size: 10.3pt;
+    line-height: 1.42;
+    color: var(--ink);
+    margin: 0;
+  }
+
+  .name {
+    font-family: Cambria, Georgia, "Times New Roman", serif;
+    font-size: 25pt;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 3pt 0;
+  }
+
+  .contact {
+    color: var(--muted);
+    font-size: 9.3pt;
+    margin-bottom: 14pt;
+  }
+  .contact span + span::before {
+    content: "\00a0\00a0\2022\00a0\00a0";
+    color: var(--rule);
+  }
+
+  h2 {
+    font-family: Calibri, "Segoe UI", Arial, sans-serif;
+    font-size: 9.7pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--ink);
+    margin: 15pt 0 6pt 0;
+    padding-bottom: 3pt;
+    border-bottom: 1pt solid var(--rule);
+    break-after: avoid;
+  }
+  h2:first-of-type { margin-top: 0; }
+
+  .summary {
+    margin: 0 0 2pt 0;
+  }
+
+  .skills-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 8pt;
+    row-gap: 2.5pt;
+  }
+  .skills-grid .cat {
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .skills-grid .items {
+    color: var(--ink);
+  }
+
+  .entry {
+    margin-bottom: 10pt;
+    break-inside: avoid;
+  }
+  .entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10pt;
+  }
+  .entry-title {
+    font-weight: 700;
+  }
+  .entry-sub {
+    color: var(--muted);
+    font-size: 9.6pt;
+    margin-top: 0.5pt;
+    margin-bottom: 3pt;
+  }
+  .entry-dates {
+    color: var(--muted);
+    font-size: 9.3pt;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .entry-project {
+    font-style: italic;
+    color: var(--muted);
+    margin-bottom: 3pt;
+  }
+
+  ul.bullets {
+    margin: 0;
+    padding-left: 13pt;
+  }
+  ul.bullets li {
+    margin-bottom: 2.5pt;
+  }
+  ul.bullets li::marker {
+    color: var(--rule);
+  }
+
+  .edu-entry {
+    margin-bottom: 4pt;
+  }
+  .edu-degree {
+    font-weight: 700;
+  }
+  .edu-meta {
+    color: var(--muted);
+  }
+
+  .cert-list {
+    margin: 0;
+    padding-left: 13pt;
+  }
+  .cert-list li {
+    margin-bottom: 2pt;
+  }
+  .cert-list li::marker {
+    color: var(--rule);
+  }
+</style>
+</head>
+<body>
+  <div class="name">{{ name }}</div>
+  <div class="contact">
+    {% if location %}<span>{{ location }}</span>{% endif %}
+    {% if phone %}<span>{{ phone }}</span>{% endif %}
+    {% if email %}<span>{{ email }}</span>{% endif %}
+    {% if linkedin %}<span>{{ linkedin }}</span>{% endif %}
+  </div>
+
+  {% if summary %}
+  <h2>Summary</h2>
+  <p class="summary">{{ summary }}</p>
+  {% endif %}
+
+  {% if skills %}
+  <h2>Skills</h2>
+  <div class="skills-grid">
+    {% for s in skills %}
+    <div class="cat">{{ s.category }}</div>
+    <div class="items">{{ s['items'] }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if experience %}
+  <h2>Experience</h2>
+  {% for e in experience %}
+  <div class="entry">
+    <div class="entry-header">
+      <span class="entry-title">{{ e.title }}, {{ e.company }}</span>
+      <span class="entry-dates">{{ e.dates }}</span>
+    </div>
+    <div class="entry-sub">{{ e.location }}</div>
+    {% if e.project %}<div class="entry-project">{{ e.project }}</div>{% endif %}
+    <ul class="bullets">
+      {% for b in e.bullets %}<li>{{ b }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if education %}
+  <h2>Education</h2>
+  {% for ed in education %}
+  <div class="edu-entry">
+    <span class="edu-degree">{{ ed.degree }}</span><span class="edu-meta">, {{ ed.school }} ({{ ed.year }}){% if ed.details %} — {{ ed.details }}{% endif %}</span>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if certifications %}
+  <h2>Certifications</h2>
+  <ul class="cert-list">
+    {% for c in certifications %}<li>{{ c }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</body>
+</html>
