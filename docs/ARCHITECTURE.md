@@ -407,7 +407,19 @@ Proven techniques pulled directly from the sibling project's approach:
   first and confirmed live to be unreliable: `COMPOSER`'s broadest
   fallback selectors (a bare `textarea`, `form textarea`) can match
   something unrelated on the logged-out landing page, so the code would
-  think it found the real message box when it hadn't.
+  think it found the real message box when it hadn't. Nothing is typed or
+  pasted into the composer until the login check resolves either way - a
+  login prompt never gets a job description silently thrown at it.
+
+`ask()` takes an optional `on_status` callback, called with a short note
+when it starts waiting for login. `generation.py` wires this to write
+straight into the opportunity's `error` column (guarded to only apply
+while the row is still `generating`, in case a late callback fires after
+the row's already moved on) - repurposed as a general in-progress status
+note, not just a failure message. The Queue screen shows it next to the
+`generating` badge in a neutral tone (only real failures get the red
+`failed` treatment), so a row waiting on your sign-in says so immediately
+instead of sitting silent for up to 5 minutes before finally erroring out.
 
 One deliberate change from the source, though not the only one that ended
 up necessary: its sync Playwright API forces a dedicated worker thread +

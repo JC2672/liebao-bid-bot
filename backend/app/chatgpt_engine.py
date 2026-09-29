@@ -51,9 +51,14 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 import pyperclip
 from playwright.async_api import Browser, BrowserContext, Locator, Page, Playwright, async_playwright
+
+# Called with a short human-readable progress note (currently just the
+# login wait) - see ask()'s docstring.
+StatusCallback = Callable[[str], None] | None
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 USER_DATA = DATA_DIR / "chatgpt-profile"
@@ -160,7 +165,7 @@ def _ensure_thread() -> asyncio.AbstractEventLoop:
     return _thread_loop
 
 
-async def ask(prompt: str, new_chat: bool = True) -> str:
+async def ask(prompt: str, new_chat: bool = True, on_status: StatusCallback = None) -> str:
     """Send one prompt, return ChatGPT's reply text.
 
     Runs on the dedicated Playwright thread (see module docstring for why),
@@ -170,19 +175,35 @@ async def ask(prompt: str, new_chat: bool = True) -> str:
     simply wait their turn. `new_chat=False` would continue the chat
     already open (not used by this project yet, but kept since a follow-up
     like job_finder's score/revise loop is a plausible later addition).
+
+    `on_status`, if given, is called (from the dedicated thread, not the
+    caller's) with short human-readable progress notes - currently just
+    the login wait, so a row stuck on `generating` for that reason shows
+    *why* instead of sitting silent for up to LOGIN_WAIT seconds before
+    finally erroring out. Never raises on its own account; a failure in
+    the callback shouldn't take down the actual generation.
     """
     loop = _ensure_thread()
-    future = asyncio.run_coroutine_threadsafe(_ask_on_thread(prompt, new_chat), loop)
+    future = asyncio.run_coroutine_threadsafe(_ask_on_thread(prompt, new_chat, on_status), loop)
     return await asyncio.wrap_future(future)
 
 
-async def _ask_on_thread(prompt: str, new_chat: bool) -> str:
+async def _ask_on_thread(prompt: str, new_chat: bool, on_status: StatusCallback) -> str:
     assert _lock is not None
     async with _lock:
-        return await _converse(prompt, new_chat)
+        return await _converse(prompt, new_chat, on_status)
 
 
-async def _converse(prompt: str, new_chat: bool) -> str:
+def _report(on_status: StatusCallback, message: str) -> None:
+    if on_status is None:
+        return
+    try:
+        on_status(message)
+    except Exception:  # noqa: BLE001 - a broken status callback shouldn't fail the generation itself
+        pass
+
+
+async def _converse(prompt: str, new_chat: bool, on_status: StatusCallback) -> str:
     global _context, _page
     try:
         if _context is None or not _context.pages:
@@ -199,12 +220,15 @@ async def _converse(prompt: str, new_chat: bool) -> str:
 
         # Checked first, directly - not inferred from the composer being
         # absent (see LOGIN_BUTTON's own comment for why that was unreliable).
+        # Nothing is typed or pasted into the composer until this resolves
+        # either way - the whole point is that a login prompt never gets a
+        # job description silently thrown at it.
         if await _visible(page, LOGIN_BUTTON):
-            box = await _wait_for_login(page)
+            box = await _wait_for_login(page, on_status)
         else:
             box = await _find(page, COMPOSER, timeout=15000)
             if box is None:
-                box = await _wait_for_login(page)
+                box = await _wait_for_login(page, on_status)
 
         await box.click()
         await _fill(page, prompt)
@@ -224,12 +248,14 @@ async def _converse(prompt: str, new_chat: bool) -> str:
         raise ChatError(f"{type(exc).__name__}: {str(exc)[:200]}") from exc
 
 
-async def _wait_for_login(page: Page) -> Locator:
+async def _wait_for_login(page: Page, on_status: StatusCallback) -> Locator:
+    _report(on_status, "Waiting for you to sign in to ChatGPT - check the browser window that opened.")
     deadline = time.time() + LOGIN_WAIT
     while time.time() < deadline:
         if not await _visible(page, LOGIN_BUTTON):
             box = await _find(page, COMPOSER, timeout=3000)
             if box is not None:
+                _report(on_status, "Signed in - continuing.")
                 return box
         else:
             await asyncio.sleep(1)

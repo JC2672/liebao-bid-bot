@@ -119,7 +119,22 @@ async def run_generation(opp_id: int) -> None:
             profile.linkedin, row["title"], row["company"], row["description"],
         )
 
-        reply = await chatgpt_engine.ask(prompt)
+        def _on_status(message: str) -> None:
+            # Reuses the `error` column as a general in-progress status
+            # note, not just a failure message - lets the Queue screen show
+            # "waiting for you to sign in" live instead of the row sitting
+            # silently on `generating` for up to 5 minutes before finally
+            # erroring out. Guarded to only touch the row while it's still
+            # actually `generating`, in case a late callback fires after
+            # the row has already moved on (e.g. the user hit Retry).
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE opportunities SET error = ?, updated_at = datetime('now') "
+                    "WHERE id = ? AND status = 'generating'",
+                    (message, opp_id),
+                )
+
+        reply = await chatgpt_engine.ask(prompt, on_status=_on_status)
         resume = parse_resume_json(reply)
 
         template_html = templates_module.get_html(profile.template_id)

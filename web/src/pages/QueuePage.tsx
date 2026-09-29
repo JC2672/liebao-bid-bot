@@ -210,8 +210,15 @@ export function QueuePage({ active }: { active: boolean }) {
                 <Td className="text-fg-muted">{o.location}</Td>
                 <Td>
                   <StatusBadge status={o.status} />
-                  {o.status === "failed" && o.error && (
-                    <span className="ml-2 text-xs text-bad">{o.error}</span>
+                  {/* `error` doubles as a live in-progress note while
+                      generating (e.g. "waiting for you to sign in") - not
+                      an actual failure yet, so it's shown in a neutral
+                      tone rather than the red used once status is really
+                      `failed`. */}
+                  {o.error && (
+                    <span className={`ml-2 text-xs ${o.status === "failed" ? "text-bad" : "text-fg-muted"}`}>
+                      {o.error}
+                    </span>
                   )}
                 </Td>
                 <Td>
