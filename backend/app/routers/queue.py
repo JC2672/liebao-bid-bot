@@ -1,9 +1,11 @@
 """Part 2 (queue side): import shortlisted rows, list the queue, and the
-per-row actions (Open Folder, Applied, Remove, Retry).
+per-row actions (Open Folder, Applied, Remove, Retry, Generate).
 
 The SQLite `opportunities` table is a work queue only - see docs/ARCHITECTURE.md.
-Generation itself (Open AI Chat / API call -> PDF) is deliberately not in this
-router yet; that's Phase 3. For now rows sit at `queued` until that engine exists.
+Generation itself (ChatGPT web -> resume_json -> PDF) lives in generation.py;
+this router only ever flips a row to `generating` and enqueues it there - see
+generation.py's module docstring for why (a single background worker, not
+this request, does the actual work).
 """
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile
 from openpyxl import load_workbook
 
-from .. import sheets
+from .. import generation, sheets
 from ..db import get_conn
 from ..models import BulkIds, Opportunity
 from ..profiles import get_profile
@@ -156,6 +158,24 @@ def retry_opportunity(opp_id: int) -> dict:
     return {"ok": True}
 
 
+@router.post("/{opp_id}/generate")
+def generate_opportunity(opp_id: int) -> dict:
+    """Flips the row to `generating` and hands it to generation.py's
+    background worker - returns immediately, the actual ChatGPT/PDF work
+    happens off-request. The Queue screen's existing poll picks up the
+    eventual ready/failed transition."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE opportunities SET status = 'generating', error = NULL, updated_at = datetime('now') "
+            "WHERE id = ? AND status = 'queued'",
+            (opp_id,),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(400, "Opportunity is not in 'queued' state")
+    generation.enqueue(opp_id)
+    return {"ok": True}
+
+
 @router.post("/bulk-remove")
 def bulk_remove(body: BulkIds) -> dict:
     if not body.ids:
@@ -185,6 +205,29 @@ def bulk_retry(body: BulkIds) -> dict:
             body.ids,
         )
     return {"retried": cur.rowcount}
+
+
+@router.post("/bulk-generate")
+def bulk_generate(body: BulkIds) -> dict:
+    if not body.ids:
+        return {"generating": 0}
+    with get_conn() as conn:
+        placeholders = ",".join("?" * len(body.ids))
+        queued_ids = [
+            r["id"] for r in conn.execute(
+                f"SELECT id FROM opportunities WHERE id IN ({placeholders}) AND status = 'queued'",
+                body.ids,
+            ).fetchall()
+        ]
+        if queued_ids:
+            conn.execute(
+                f"UPDATE opportunities SET status = 'generating', error = NULL, updated_at = datetime('now') "
+                f"WHERE id IN ({','.join('?' * len(queued_ids))})",
+                queued_ids,
+            )
+    for opp_id in queued_ids:
+        generation.enqueue(opp_id)
+    return {"generating": len(queued_ids)}
 
 
 @router.post("/{opp_id}/open-folder")

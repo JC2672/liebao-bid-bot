@@ -3,15 +3,16 @@
 Job-application assistant for US/Remote Salesforce roles. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
-Status: **Phase 1 done, Phase 2 in progress** — Fetch screen (18 sources,
-hard gates, XLSX export), Queue screen (import shortlist, bulk/single
-Applied/Remove/Retry, Sheet logging), a Profiles screen, and a Templates
-screen (resume layouts, independent of Profiles - a profile just
-references one live, see docs/ARCHITECTURE.md) are wired up. The ChatGPT-web
-generation engine (Phase 3) is not yet built, so queued opportunities
-currently stay at `queued` — there's no PDF pipeline running against them
-yet, though `GET /templates/<id>/preview.pdf` renders a template against
-sample data so the design can be built and checked ahead of that.
+Status: **Phases 1-3 built.** Fetch screen (18 sources, hard gates, XLSX
+export), Queue screen (import shortlist, bulk/single Generate/Applied/
+Remove/Retry, Sheet logging), a Profiles screen, a Templates screen (resume
+layouts, independent of Profiles - a profile just references one live),
+and the generation engine itself: click **Generate** on a queued row and a
+real Chrome window (a dedicated profile, separate from your everyday
+Chrome) drives chatgpt.com, tailors a resume as JSON against your prompt +
+the job description, and prints a real PDF into that row's staging folder
+- see docs/ARCHITECTURE.md's "Generation engine" for exactly how. First use
+needs a one-time sign-in in that window; it's remembered after that.
 
 ## Quick start
 

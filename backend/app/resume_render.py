@@ -25,6 +25,7 @@ SAMPLE_CONTACT = {
 }
 
 SAMPLE_RESUME_JSON = {
+    "title": "Senior Salesforce Developer",
     "summary": (
         "Salesforce Developer with 6+ years building and scaling Sales Cloud and "
         "Service Cloud implementations for mid-market and enterprise orgs. Deep in "

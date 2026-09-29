@@ -1,9 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FolderOpen, RotateCcw, Check, Trash2 } from "lucide-react";
+import { ExternalLink, FolderOpen, RotateCcw, Check, Sparkles, Trash2 } from "lucide-react";
 import {
+  bulkGenerate,
   bulkRemove,
   bulkRetry,
+  generateOpportunity,
   importShortlist,
   listProfiles,
   listQueue,
@@ -42,6 +44,7 @@ export function QueuePage({ active }: { active: boolean }) {
   const appliedMutation = useMutation({ mutationFn: markApplied, onSuccess: invalidate });
   const removeMutation = useMutation({ mutationFn: removeOpportunity, onSuccess: invalidate });
   const retryMutation = useMutation({ mutationFn: retryOpportunity, onSuccess: invalidate });
+  const generateMutation = useMutation({ mutationFn: generateOpportunity, onSuccess: invalidate });
   const bulkRemoveMutation = useMutation({
     mutationFn: bulkRemove,
     onSuccess: () => {
@@ -56,11 +59,22 @@ export function QueuePage({ active }: { active: boolean }) {
       invalidate();
     },
   });
+  const bulkGenerateMutation = useMutation({
+    mutationFn: bulkGenerate,
+    onSuccess: () => {
+      setSelected(new Set());
+      invalidate();
+    },
+  });
 
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const someSelected = selected.size > 0 && !allSelected;
   const selectedFailedCount = useMemo(
     () => rows.filter((r) => selected.has(r.id) && r.status === "failed").length,
+    [rows, selected],
+  );
+  const selectedQueuedCount = useMemo(
+    () => rows.filter((r) => selected.has(r.id) && r.status === "queued").length,
     [rows, selected],
   );
 
@@ -144,6 +158,15 @@ export function QueuePage({ active }: { active: boolean }) {
               no separate "Clear selection" button needed. */}
           <div className="ml-auto flex items-center gap-1">
             <IconButton
+              title={`Generate ${selectedQueuedCount} selected`}
+              tone="primary"
+              badge={selectedQueuedCount}
+              disabled={selectedQueuedCount === 0 || bulkGenerateMutation.isPending}
+              onClick={() => bulkGenerateMutation.mutate([...selected])}
+            >
+              <Sparkles size={16} />
+            </IconButton>
+            <IconButton
               title={`Retry ${selectedFailedCount} selected`}
               badge={selectedFailedCount}
               disabled={selectedFailedCount === 0 || bulkRetryMutation.isPending}
@@ -199,6 +222,14 @@ export function QueuePage({ active }: { active: boolean }) {
                       onClick={() => openFolder(o.id)}
                     >
                       <FolderOpen size={16} />
+                    </IconButton>
+                    <IconButton
+                      title="Generate"
+                      tone="primary"
+                      disabled={o.status !== "queued" || generateMutation.isPending}
+                      onClick={() => generateMutation.mutate(o.id)}
+                    >
+                      <Sparkles size={16} />
                     </IconButton>
                     <IconButton
                       title="Retry"

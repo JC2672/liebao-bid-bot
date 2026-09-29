@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import generation
 from .db import init_db
 from .native import pick_folder
 from .routers import fetch, jobright_session, profiles, queue, templates
@@ -28,8 +29,9 @@ app.include_router(jobright_session.router)
 
 
 @app.on_event("startup")
-def _startup() -> None:
+async def _startup() -> None:
     init_db()
+    generation.start_worker()
 
 
 @app.get("/health")

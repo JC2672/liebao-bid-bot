@@ -232,12 +232,20 @@ export async function retryOpportunity(id: number) {
   await api.post(`/queue/${id}/retry`);
 }
 
+export async function generateOpportunity(id: number) {
+  await api.post(`/queue/${id}/generate`);
+}
+
 export async function bulkRemove(ids: number[]) {
   await api.post("/queue/bulk-remove", { ids });
 }
 
 export async function bulkRetry(ids: number[]) {
   await api.post("/queue/bulk-retry", { ids });
+}
+
+export async function bulkGenerate(ids: number[]) {
+  await api.post("/queue/bulk-generate", { ids });
 }
 
 export async function openFolder(id: number) {

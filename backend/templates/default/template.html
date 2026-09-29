@@ -34,6 +34,12 @@
     margin: 0 0 3pt 0;
   }
 
+  .headline {
+    font-size: 11.5pt;
+    color: var(--muted);
+    margin: 0 0 5pt 0;
+  }
+
   .contact {
     color: var(--muted);
     font-size: 9.3pt;
@@ -142,6 +148,7 @@
 </head>
 <body>
   <div class="name">{{ name }}</div>
+  {% if title %}<div class="headline">{{ title }}</div>{% endif %}
   <div class="contact">
     {% if location %}<span>{{ location }}</span>{% endif %}
     {% if phone %}<span>{{ phone }}</span>{% endif %}

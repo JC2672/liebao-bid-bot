@@ -351,30 +351,106 @@ company+normalized title+location).
 
 ## Generation engine
 
-1. Take next `queued` row for the active profile → `generating`.
-2. Build prompt = profile's `prompt.md` + this opportunity's `description`.
-3. Send via **ChatGPT web** (Chrome extension, Temporary Chat) — API fallback
-   togglable for when web is capped or backed up. Manual copy/paste mode exists
-   as a bootstrap/fallback path.
-4. Parse → validate against schema → substitute `{PLACEHOLDER}` fields from
-   `profile.json` → render `template.html` → print to PDF (headless Chromium)
-   → write PDF + JD.txt to `data/staging/<id>/`.
-5. Row → `ready`. On any failure → `failed` + error, retryable.
+Click **Generate** on a `queued` row (single or bulk) → `generating` →
+`chatgpt_engine.ask()` drives ChatGPT's real web UI → `generation.py`
+parses/validates/renders → `ready`, with a real PDF + JD.txt staged. On any
+failure → `failed` + a readable error, retryable (Retry flips it back to
+`queued`; click Generate again).
 
-Queue screen actions per row: **Open Post** (new tab), **Open Folder** (opens
-the staging dir via the backend, since browsers can't open local folders),
-**Applied** (files the application per "On disk layout" above, appends to the
-Sheet, deletes the row), **Remove** (drops the row + staging files, nothing
-recorded).
+This replaced an earlier sketch (written before any of Fetch/Templates
+existed) that assumed a Chrome extension driving ChatGPT, mirroring
+Jobright's cookie-relay pattern. Before building either, a sibling desktop
+project's own working `chatgpt.py` was studied directly (not copied
+blindly - see its own module for the reasoning this pulled from) and its
+approach adopted instead, for a concrete reason: an extension-style cookie
+relay works for Jobright because its API is a plain HTTP JSON API once you
+have valid cookies. ChatGPT isn't a safe bet for that - this project
+repeatedly found, investigating other sites, that replaying real session
+cookies through a *different* HTTP client than the one that earned them
+gets rejected by TLS/device-fingerprint checks (confirmed live against
+Monster's DataDome, using the user's own real cookies). Real browser
+automation sidesteps that question entirely, and the sibling project
+proves it works in practice against chatgpt.com specifically.
+
+**`chatgpt_engine.py`** - a persistent Playwright browser context, not
+headless: `launch_persistent_context` against a dedicated Chrome profile
+(`data/chatgpt-profile/`, separate from the user's everyday browsing, so a
+crash here can't touch it) that the user signs into once, by hand, in the
+real visible window that opens - the sign-in is then remembered across
+runs. A later run first tries `connect_over_cdp` to reattach to a window a
+prior run left open (`--remote-debugging-port=9333`) rather than failing
+on the locked profile - this matters more for us than it did for the
+sibling project, since `uvicorn --reload` restarts the backend process (and
+would otherwise orphan the browser it spawned) on every source save. If the
+profile really is locked, Chrome/Edge processes matched by the profile's
+own path get force-closed and the `Singleton*` lock files removed before
+retrying.
+
+Two proven techniques pulled directly from the sibling project's approach:
+- **Settle-time completion detection** - "done" means the Stop button is
+  gone *and* the answer text hasn't grown for ~2.5s, not just "Stop button
+  gone" (that alone would cut a reply off during a streaming pause).
+- **Paste-then-verify-length, fall back to chunked typing** - a resume
+  prompt (tailoring instructions + full JD + schema instructions) can run
+  to tens of thousands of characters; a long clipboard paste into ChatGPT's
+  composer can silently turn into a file attachment instead of landing as
+  text, so what actually landed is measured before trusting it was sent.
+
+One deliberate change from the source: its sync Playwright API forces a
+dedicated worker thread + `queue.Queue` just to serialize access (Playwright's
+sync API belongs to one thread for its whole life). This project's backend
+is FastAPI/asyncio-native, so `chatgpt_engine.py` uses Playwright's **async
+API** directly under a single `asyncio.Lock` instead - no thread/queue
+machinery needed, since only one thing (this event loop) ever needs to hold
+the lock anyway. New chat per job (not ChatGPT's Temporary Chat UI toggle)
+is the context-isolation mechanism, so one profile's JD/resume can't bleed
+into the next - simpler, and doesn't depend on a toggle that's itself a
+selector-fragile moving target.
+
+**`resume_schema.py` + `generation.py`** - ChatGPT is asked to return a
+single JSON object (schema below) instead of a raw HTML document like the
+sibling project's own prompt does; validated structurally with Pydantic
+(`ResumeJson.model_validate`), not the string-heuristic approach ("starts
+with `<html>`, length > 500, no refusal phrases") that project uses for its
+free-form output - real schema validation was only possible for us because
+Phase 2 already built a real `resume_json` contract and Jinja2 template,
+which didn't exist yet when that approach was written. Contact fields
+(`name`/`location`/`phone`/`email`/`linkedin`) are asked for as literal
+placeholder tokens and then **overwritten** directly from the profile
+regardless of what ChatGPT actually returned there - not a find/replace
+over the JSON text, since that could mis-fire on a stray literal token
+elsewhere in free text.
+
+A single in-process background worker (`generation.start_worker()`,
+started from `main.py`'s existing startup event) consumes an
+`asyncio.Queue` of opportunity ids one at a time - there's only one
+browser/conversation anyway. `POST /queue/{id}/generate` (and
+`/queue/bulk-generate`) just flip status to `generating` and enqueue,
+returning immediately; the Queue screen's existing 5s poll (already built
+for the `generating` badge) picks up the eventual `ready`/`failed`
+transition, so no new frontend polling logic was needed.
+
+Explicitly not built this pass (see the sibling project for what a fuller
+version could look like): an API fallback, and a score/revise follow-up
+loop. Both are real YAGNI calls, not oversights - worth adding only if the
+web path proves insufficient in practice.
+
+Queue screen actions per row: **Generate** (queued only - kicks off the
+pipeline above), **Open Post** (new tab), **Open Folder** (opens the
+staging dir via the backend, since browsers can't open local folders),
+**Applied** (files the application per "On disk layout" above, appends to
+the Sheet, deletes the row), **Remove** (drops the row + staging files,
+nothing recorded), **Retry** (failed only - back to `queued`).
 
 ## Tech stack
 
 | Layer | Choice | Why |
 |---|---|---|
-| Backend | Python 3.14 + FastAPI + SQLite (stdlib `sqlite3`) | JobSpy and the ATS scraping ecosystem are Python; FastAPI serves the local UI and exposes an OpenAPI spec for typed frontend clients |
-| Frontend | React + Vite + TypeScript + shadcn/ui + TanStack Query/Table | clean, structured UI without a heavy design system |
-| Extension | WXT (Manifest V3, TypeScript) | drives your real, logged-in ChatGPT session; talks to the backend over `localhost` |
-| PDF | Jinja2 template → HTML → headless Chromium `page.pdf()` (Playwright) | pixel-accurate, template fully controls layout |
+| Backend | Python 3.11+ + FastAPI + SQLite (stdlib `sqlite3`) | JobSpy and the ATS scraping ecosystem are Python; FastAPI serves the local UI and exposes an OpenAPI spec for typed frontend clients |
+| Frontend | React + Vite + TypeScript + TanStack Query, Tailwind | clean, structured UI without a heavy design system |
+| Extension | Plain Manifest V3, no build step | relays the user's real browser session for Jobright (cookie-based - see "Login-gated sources"); **not** used for ChatGPT - see "Generation engine" for why that took a different mechanism (a Playwright-driven persistent browser context instead) |
+| PDF | Jinja2 template → HTML → headless Chromium `page.pdf()` (Playwright) | pixel-accurate, template fully controls layout; the same mechanism renders both Template previews (Phase 2, sample data) and real generations (Phase 3, `resume_json`) |
+| ChatGPT | Playwright, async API, persistent browser context (`chatgpt_engine.py`) | drives the real chatgpt.com web UI directly - see "Generation engine" |
 | Sheets | Google service account + `gspread` | no OAuth login flow; you share the Sheet with the service account's email once |
 
 ## Repo layout
@@ -384,36 +460,49 @@ liebao-bid-bot/
 ├─ backend/
 │  ├─ app/
 │  │  ├─ main.py
-│  │  ├─ db.py                 # sqlite connection + schema
-│  │  ├─ models.py             # pydantic models
-│  │  ├─ sources/               # one module per source adapter
-│  │  ├─ gates.py               # hard filters
+│  │  ├─ db.py                  # sqlite connection + schema (opportunities only)
+│  │  ├─ models.py              # pydantic wire models
+│  │  ├─ sources/                # one module per source adapter
+│  │  ├─ gates.py                # hard filters
 │  │  ├─ sheets.py               # gspread wrapper
-│  │  ├─ pdf.py                  # jinja2 + playwright render
+│  │  ├─ profiles.py             # profile CRUD (disk, not SQLite)
+│  │  ├─ templates.py            # template CRUD (disk, not SQLite) - independent of profiles
+│  │  ├─ resume_schema.py        # ResumeJson Pydantic schema (the LLM output contract)
+│  │  ├─ resume_render.py        # jinja2 render + playwright PDF print
+│  │  ├─ chatgpt_engine.py       # persistent Playwright context driving chatgpt.com
+│  │  ├─ generation.py           # prompt build, parse/validate, background worker
 │  │  └─ routers/
-│  │     ├─ fetch.py            # POST /fetch, GET /fetch/export
-│  │     ├─ queue.py            # import, list, applied, remove, retry
-│  │     └─ profiles.py
+│  │     ├─ fetch.py             # POST /fetch, GET /fetch/export
+│  │     ├─ queue.py             # import, list, applied, remove, retry, generate
+│  │     ├─ profiles.py
+│  │     └─ templates.py         # CRUD + preview.html/preview.pdf
 │  ├─ profiles/
-│  │  └─ <profile-name>/ profile.json, prompt.md, template.html
+│  │  └─ <profile-id>/ profile.json, prompt.md
+│  ├─ templates/
+│  │  └─ <template-id>/ template.json, template.html
 │  └─ pyproject.toml
-├─ web/                         # React app
-├─ extension/                   # companion extension (Jobright session today;
-│                                #   Phase 3's ChatGPT-web worker likely lives
-│                                #   here too - plain Manifest V3 for now, no
-│                                #   WXT build step, since nothing has needed one yet)
-├─ data/                        # gitignored: sqlite db, staging/, browser-sessions/
+├─ web/                          # React app
+├─ extension/                    # companion extension - Jobright session relay only
+├─ data/                         # gitignored: sqlite db, staging/, browser-sessions/,
+│                                 #   chatgpt-profile/ (the persistent Chrome profile)
 └─ docs/
    └─ ARCHITECTURE.md
 ```
 
 ## Build phases
 
-1. **Fetch screen** — sources, hard gates + flags, results table, XLSX export.
-2. **Import + Queue screen** — profile picker, dedupe vs. Sheet, SQLite queue,
-   manual-paste generation path (prompt→you paste ChatGPT's JSON→PDF renders),
-   Open Post/Open Folder/Applied/Remove, Sheet append on Applied.
-3. **ChatGPT web worker** (extension) replacing manual paste; API fallback.
-4. **More sources, Dice in particular; polish and error handling.**
+1. **Fetch** — sources (18 and counting), hard gates + flags, results table,
+   XLSX export.
+2. **Templates & Queue plumbing** — Profiles and Templates screens (both
+   disk-backed CRUD, Templates independent of and live-referenced by
+   Profiles), SQLite queue (import, dedupe vs. Sheet, Open Post/Open
+   Folder/Applied/Remove/Retry, Sheet append on Applied), the resume
+   template/PDF pipeline (`resume_render.py`) exercised via sample-data
+   previews since nothing produced real `resume_json` yet.
+3. **Generation engine** — `chatgpt_engine.py` + `generation.py`: real
+   `resume_json` from ChatGPT's web UI, replacing the sample data Phase 2
+   validated the render pipeline against.
+4. **Ongoing**: more sources, polish, error handling, revisit API fallback
+   if the web path proves insufficient in practice.
 
 Each phase is independently useful and gets its own commit(s).
