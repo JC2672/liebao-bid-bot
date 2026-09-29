@@ -34,7 +34,6 @@ from . import (
 SOURCES: dict[str, callable] = {
     "linkedin": jobspy_source.fetch_linkedin,
     "indeed": jobspy_source.fetch_indeed,
-    "google": jobspy_source.fetch_google,
     "dice": dice_source.fetch_dice,
     "remotive": remotive_source.fetch_remotive,
     "remoteok": remoteok_source.fetch_remoteok,
