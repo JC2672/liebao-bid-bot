@@ -3,11 +3,7 @@ not the paid API, and not a companion-extension cookie relay like Jobright's.
 
 Adapted from a sibling desktop project's proven `chatgpt.py` (studied, not
 copied blindly - see docs/ARCHITECTURE.md's "Generation engine" section for
-the full reasoning). The one deliberate change from that source: this uses
-Playwright's **async API** directly under an `asyncio.Lock`, since our
-backend is FastAPI/asyncio-native - the sibling's sync-API-forces-a-
-dedicated-worker-thread-plus-queue.Queue pattern doesn't apply here, only
-one thing (this event loop) ever needs to hold the lock.
+the full reasoning).
 
 Why real browser automation, not a cookie relay: this project repeatedly
 found, investigating other sites this session, that replaying real session
@@ -24,6 +20,26 @@ minutes-long interaction, not just borrow a cookie in passing. A separate
 profile also means a crash here can't disturb the user's real browsing
 session, and reattaching to it via `connect_over_cdp` (see `_open` below)
 means the login is only ever needed once.
+
+Why a dedicated background thread with its own event loop, when the rest of
+this project just awaits things on FastAPI's own loop: confirmed live,
+this is not optional on Windows. Playwright's async API launches the
+browser via a real OS subprocess (`asyncio.create_subprocess_exec`), which
+requires a `ProactorEventLoop` on Windows - `SelectorEventLoop` raises a
+bare `NotImplementedError` the instant a subprocess is requested, with no
+other detail. `uvicorn --reload` (this project's own dev launch, see
+start.bat) makes this unavoidable on the *main* loop specifically: reading
+uvicorn's own source (`uvicorn/loops/asyncio.py`) shows it deliberately
+instantiates `SelectorEventLoop` directly whenever `--reload` is active on
+Windows (needed for its reload-supervisor's own signal handling), bypassing
+`asyncio.set_event_loop_policy()` entirely - that fix was tried first here,
+confirmed live not to work, before landing on this one. A sibling desktop
+project never hits this at all, not because it solved something harder,
+but because it's a standalone app with no ASGI reload server in the
+picture. Running Playwright on its own thread, with its own directly-
+instantiated `ProactorEventLoop` (bypassing the policy question entirely,
+not just working around uvicorn's override of it), decouples the two
+completely - this works the same whether or not `--reload` is on.
 """
 from __future__ import annotations
 
@@ -31,6 +47,8 @@ import asyncio
 import os
 import re
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -102,18 +120,54 @@ class ChatError(Exception):
 _playwright: Playwright | None = None
 _context: BrowserContext | None = None
 _page: Page | None = None
-_lock = asyncio.Lock()
+_lock: asyncio.Lock | None = None  # created on the dedicated thread, see _thread_main
+
+_thread: threading.Thread | None = None
+_thread_loop: asyncio.AbstractEventLoop | None = None
+_thread_ready = threading.Event()
+
+
+def _thread_main() -> None:
+    """Owns Playwright for its whole life, on a loop capable of launching a
+    subprocess on Windows regardless of what the main FastAPI loop is -
+    see the module docstring."""
+    global _thread_loop, _lock
+    _thread_loop = asyncio.ProactorEventLoop() if sys.platform == "win32" else asyncio.new_event_loop()
+    asyncio.set_event_loop(_thread_loop)
+    _lock = asyncio.Lock()
+    _thread_ready.set()
+    _thread_loop.run_forever()
+
+
+def _ensure_thread() -> asyncio.AbstractEventLoop:
+    global _thread
+    if _thread is None or not _thread.is_alive():
+        _thread_ready.clear()
+        _thread = threading.Thread(target=_thread_main, daemon=True)
+        _thread.start()
+        _thread_ready.wait(timeout=10)
+    assert _thread_loop is not None
+    return _thread_loop
 
 
 async def ask(prompt: str, new_chat: bool = True) -> str:
     """Send one prompt, return ChatGPT's reply text.
 
-    Only one call runs at a time (there's only one browser, one
-    conversation) - concurrent callers simply wait their turn.
-    `new_chat=False` would continue the chat already open (not used by
-    this project yet, but kept since a follow-up like job_finder's
-    score/revise loop is a plausible later addition).
+    Runs on the dedicated Playwright thread (see module docstring for why),
+    bridged back into the caller's own event loop via
+    `run_coroutine_threadsafe`. Only one call runs at a time on that thread
+    (there's only one browser, one conversation) - concurrent callers
+    simply wait their turn. `new_chat=False` would continue the chat
+    already open (not used by this project yet, but kept since a follow-up
+    like job_finder's score/revise loop is a plausible later addition).
     """
+    loop = _ensure_thread()
+    future = asyncio.run_coroutine_threadsafe(_ask_on_thread(prompt, new_chat), loop)
+    return await asyncio.wrap_future(future)
+
+
+async def _ask_on_thread(prompt: str, new_chat: bool) -> str:
+    assert _lock is not None
     async with _lock:
         return await _converse(prompt, new_chat)
 
