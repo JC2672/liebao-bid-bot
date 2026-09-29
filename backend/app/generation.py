@@ -100,13 +100,18 @@ def _safe_filename(s: str) -> str:
 async def run_generation(opp_id: int) -> None:
     """The actual pipeline for one row. Always leaves the row at `ready` or
     `failed` - never raises, so the worker loop can't be taken down by one
-    bad opportunity."""
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
-    if row is None:
-        return
-
+    bad opportunity. The row lookup itself is inside the try too (a
+    previous version had it outside, which meant a failure there - or any
+    other exception this broad `except` doesn't catch - could escape and
+    silently kill the whole worker loop; confirmed live as the cause of
+    opportunities getting permanently stuck on `generating` with no
+    browser window and no way to recover them from the UI)."""
     try:
+        with get_conn() as conn:
+            row = conn.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
+        if row is None:
+            return
+
         profile = profiles_module.get_profile(row["profile"])
         prompt_md = profiles_module.get_prompt(row["profile"])
         prompt = build_prompt(
@@ -164,6 +169,23 @@ async def _worker_loop() -> None:
         opp_id = await _queue.get()
         try:
             await run_generation(opp_id)
+        except asyncio.CancelledError:
+            raise  # real shutdown/cancellation - let it propagate, don't swallow it
+        except BaseException as exc:  # noqa: BLE001 - belt-and-suspenders: run_generation
+            # already turns everything it knows how to catch into a `failed`
+            # row, but this loop itself must never die regardless - if it
+            # does, every opportunity enqueued after that point sits on
+            # `generating` forever with nothing left to process it.
+            print(f"[generation] worker loop caught an escaped exception for id={opp_id}: {exc}")
+            try:
+                with get_conn() as conn:
+                    conn.execute(
+                        "UPDATE opportunities SET status = 'failed', error = ?, updated_at = datetime('now') "
+                        "WHERE id = ? AND status = 'generating'",
+                        (f"Unexpected error: {exc}"[:500], opp_id),
+                    )
+            except Exception:  # noqa: BLE001 - even this best-effort write failing shouldn't kill the loop
+                pass
         finally:
             _queue.task_done()
 

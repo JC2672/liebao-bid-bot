@@ -386,26 +386,68 @@ profile really is locked, Chrome/Edge processes matched by the profile's
 own path get force-closed and the `Singleton*` lock files removed before
 retrying.
 
-Two proven techniques pulled directly from the sibling project's approach:
+Proven techniques pulled directly from the sibling project's approach:
 - **Settle-time completion detection** - "done" means the Stop button is
   gone *and* the answer text hasn't grown for ~2.5s, not just "Stop button
   gone" (that alone would cut a reply off during a streaming pause).
 - **Paste-then-verify-length, fall back to chunked typing** - a resume
-  prompt (tailoring instructions + full JD + schema instructions) can run
-  to tens of thousands of characters; a long clipboard paste into ChatGPT's
-  composer can silently turn into a file attachment instead of landing as
-  text, so what actually landed is measured before trusting it was sent.
+  prompt (the profile's own prompt.md, placeholders filled in, plus the
+  JD) can run to tens of thousands of characters; a long clipboard paste
+  into ChatGPT's composer can silently turn into a file attachment instead
+  of landing as text, so what actually landed is measured before trusting
+  it was sent. The composer is explicitly cleared *before* every paste
+  attempt too, not just before the typing fallback - confirmed live as a
+  real bug without that: pasting onto a composer that still had leftover
+  content from a stale render *added* to it instead of replacing it, which
+  is how one prompt ended up sent three times over in a single message.
+- **A direct login check, not an inferred one** - whether the user needs
+  to sign in is checked by looking for chatgpt.com's own "Log in" button
+  directly (`LOGIN_BUTTON`), not by treating "the composer wasn't found"
+  as a proxy for "not logged in". The composer-absence approach was tried
+  first and confirmed live to be unreliable: `COMPOSER`'s broadest
+  fallback selectors (a bare `textarea`, `form textarea`) can match
+  something unrelated on the logged-out landing page, so the code would
+  think it found the real message box when it hadn't.
 
-One deliberate change from the source: its sync Playwright API forces a
-dedicated worker thread + `queue.Queue` just to serialize access (Playwright's
-sync API belongs to one thread for its whole life). This project's backend
-is FastAPI/asyncio-native, so `chatgpt_engine.py` uses Playwright's **async
-API** directly under a single `asyncio.Lock` instead - no thread/queue
-machinery needed, since only one thing (this event loop) ever needs to hold
-the lock anyway. New chat per job (not ChatGPT's Temporary Chat UI toggle)
-is the context-isolation mechanism, so one profile's JD/resume can't bleed
-into the next - simpler, and doesn't depend on a toggle that's itself a
-selector-fragile moving target.
+One deliberate change from the source, though not the only one that ended
+up necessary: its sync Playwright API forces a dedicated worker thread +
+`queue.Queue` just to serialize access (Playwright's sync API belongs to
+one thread for its whole life). The first version of this module used
+Playwright's **async API** directly on the main FastAPI event loop under a
+single `asyncio.Lock` instead, on the theory that an asyncio-native
+backend wouldn't need the sibling's thread. That theory held for
+serializing access, but not for the subprocess launch itself: confirmed
+live, Playwright's async API launches the browser via a real OS
+subprocess, which requires a `ProactorEventLoop` on Windows -
+`SelectorEventLoop` raises a bare `NotImplementedError` the instant a
+subprocess is requested. `uvicorn --reload` (this project's own dev
+launch) makes that unavoidable on the *main* loop specifically: uvicorn's
+own source (`uvicorn/loops/asyncio.py`) shows it deliberately instantiates
+`SelectorEventLoop` directly whenever `--reload` is active on Windows,
+bypassing `asyncio.set_event_loop_policy()` entirely - that fix was tried
+first, confirmed live not to work, before landing on the real one:
+`chatgpt_engine.py` now runs on its own dedicated thread with its own
+directly-instantiated `ProactorEventLoop`, decoupled from whatever the
+main FastAPI loop is doing, bridged back via
+`run_coroutine_threadsafe`/`asyncio.wrap_future`. New chat per job (not
+ChatGPT's Temporary Chat UI toggle) is the context-isolation mechanism, so
+one profile's JD/resume can't bleed into the next - simpler, and doesn't
+depend on a toggle that's itself a selector-fragile moving target.
+
+**The background worker must never die**, confirmed live as a real gap: an
+earlier version had the row lookup outside `run_generation`'s own
+try/except, so a failure there (or anything else that broad `except
+Exception` didn't catch) could escape and silently kill the whole worker
+loop - every opportunity enqueued after that point sat on `generating`
+forever, no browser window, no error, and (at the time) no way to act on
+it from the UI either. Fixed two ways: the row lookup moved inside the
+try, and `_worker_loop` itself now catches broadly around each
+`run_generation` call (re-raising `CancelledError` so real shutdown still
+works) as a second line of defense, marking the row `failed` and moving on
+to the next item regardless of what went wrong. Retry now also accepts a
+row in `generating`, not just `failed` - a direct user-facing escape hatch
+for a stuck row regardless of cause, on top of the worker no longer being
+able to die in the first place.
 
 **`resume_schema.py` + `generation.py`** - ChatGPT is asked to return a
 single JSON object instead of a raw HTML document like the sibling
@@ -451,7 +493,9 @@ pipeline above), **Open Post** (new tab), **Open Folder** (opens the
 staging dir via the backend, since browsers can't open local folders),
 **Applied** (files the application per "On disk layout" above, appends to
 the Sheet, deletes the row), **Remove** (drops the row + staging files,
-nothing recorded), **Retry** (failed only - back to `queued`).
+nothing recorded), **Retry** (failed *or* generating - back to `queued`;
+allowed from `generating` too as a manual escape hatch for a stuck row,
+regardless of cause).
 
 ## Tech stack
 

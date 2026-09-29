@@ -147,14 +147,19 @@ def remove_opportunity(opp_id: int) -> dict:
 
 @router.post("/{opp_id}/retry")
 def retry_opportunity(opp_id: int) -> dict:
+    # Also allowed from `generating` - the escape hatch for a row stuck
+    # there with nothing actually working on it anymore (the ChatGPT
+    # window was closed mid-run, the backend restarted mid-run, etc.).
+    # generation.py's own worker is now hardened against silently dying,
+    # but this is the user-facing recovery path regardless of cause.
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE opportunities SET status = 'queued', error = NULL, updated_at = datetime('now') "
-            "WHERE id = ? AND status = 'failed'",
+            "WHERE id = ? AND status IN ('failed', 'generating')",
             (opp_id,),
         )
         if cur.rowcount == 0:
-            raise HTTPException(400, "Opportunity is not in 'failed' state")
+            raise HTTPException(400, "Opportunity is not in 'failed' or 'generating' state")
     return {"ok": True}
 
 
@@ -201,7 +206,7 @@ def bulk_retry(body: BulkIds) -> dict:
     with get_conn() as conn:
         cur = conn.execute(
             f"UPDATE opportunities SET status = 'queued', error = NULL, updated_at = datetime('now') "
-            f"WHERE id IN ({','.join('?' * len(body.ids))}) AND status = 'failed'",
+            f"WHERE id IN ({','.join('?' * len(body.ids))}) AND status IN ('failed', 'generating')",
             body.ids,
         )
     return {"retried": cur.rowcount}

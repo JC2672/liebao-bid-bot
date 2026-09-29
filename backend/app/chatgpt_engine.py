@@ -80,6 +80,16 @@ SEND = ["button[aria-label*='Send']", "[data-testid='send-button']",
         "button[data-testid='fruitjuice-send-button']", "button[type='submit']"]
 STOP = ["button[aria-label*='Stop']", "[data-testid='stop-button']", "button[aria-label*='stop']"]
 
+# The logged-out landing page's own "Log in" button - a direct signal,
+# checked *first*, rather than inferring "not logged in" from the composer
+# being absent. That inference was the original approach and turned out
+# unreliable in testing: COMPOSER's last two selectors ("form textarea",
+# bare "textarea") are generic enough to occasionally match something
+# unrelated on the landing page, making the code think it had found the
+# real composer when it hadn't - confirmed live as a real failure mode,
+# not a hypothetical one.
+LOGIN_BUTTON = ["[data-testid='login-button']", "a[href*='/auth/login']", "button:has-text('Log in')"]
+
 # Read in the page, because the reply body is a sibling of the element that
 # marks the turn as the assistant's, not its parent - no single CSS
 # selector reaches it. Several generations of ChatGPT markup tried in turn.
@@ -187,9 +197,14 @@ async def _converse(prompt: str, new_chat: bool) -> str:
             # Temporary Chat toggle, which is itself a moving UI target.
             await page.goto(CHAT_URL, wait_until="domcontentloaded", timeout=60000)
 
-        box = await _find(page, COMPOSER, timeout=15000)
-        if box is None:
+        # Checked first, directly - not inferred from the composer being
+        # absent (see LOGIN_BUTTON's own comment for why that was unreliable).
+        if await _visible(page, LOGIN_BUTTON):
             box = await _wait_for_login(page)
+        else:
+            box = await _find(page, COMPOSER, timeout=15000)
+            if box is None:
+                box = await _wait_for_login(page)
 
         await box.click()
         await _fill(page, prompt)
@@ -212,9 +227,12 @@ async def _converse(prompt: str, new_chat: bool) -> str:
 async def _wait_for_login(page: Page) -> Locator:
     deadline = time.time() + LOGIN_WAIT
     while time.time() < deadline:
-        box = await _find(page, COMPOSER, timeout=3000)
-        if box is not None:
-            return box
+        if not await _visible(page, LOGIN_BUTTON):
+            box = await _find(page, COMPOSER, timeout=3000)
+            if box is not None:
+                return box
+        else:
+            await asyncio.sleep(1)
     raise ChatError(
         "No ChatGPT message box appeared. Sign in to chatgpt.com in the "
         "window that opened, then click Generate again - the sign-in is "
@@ -389,16 +407,23 @@ async def _visible(page: Page, selectors: list[str]) -> bool:
 async def _fill(page: Page, prompt: str) -> None:
     """Get the whole prompt into the message box, and prove that it's there.
 
-    A resume prompt (profile prompt + full JD + schema instructions) can
-    run to tens of thousands of characters. Pasting is much the fastest
-    way in, but a long paste can silently be turned into an attached file
-    instead of composer text - so what landed is measured, and typing is
-    the fallback.
+    A resume prompt (the profile's own prompt.md, with its placeholders
+    filled in, plus the JD) can run to tens of thousands of characters.
+    Pasting is much the fastest way in, but a long paste can silently be
+    turned into an attached file instead of composer text - so what landed
+    is measured, and typing is the fallback.
     """
     wanted = len(prompt.strip())
 
     async def landed() -> int:
         return len((await _composer_text(page)).strip())
+
+    # Always start from an empty box - confirmed live as a real bug
+    # without this: on a composer that already had leftover content (a
+    # stale render, a previous attempt's text), pasting *added* to it
+    # instead of replacing it, which is how a prompt ended up sent three
+    # times over in a single message.
+    await _clear(page)
 
     try:
         pyperclip.copy(prompt)

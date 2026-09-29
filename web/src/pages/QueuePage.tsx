@@ -69,8 +69,11 @@ export function QueuePage({ active }: { active: boolean }) {
 
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const someSelected = selected.size > 0 && !allSelected;
-  const selectedFailedCount = useMemo(
-    () => rows.filter((r) => selected.has(r.id) && r.status === "failed").length,
+  // Retry also covers `generating` - the escape hatch for a row stuck
+  // there with nothing actually working on it anymore (closed the
+  // ChatGPT window mid-run, backend restarted mid-run, etc.).
+  const selectedRetryableCount = useMemo(
+    () => rows.filter((r) => selected.has(r.id) && (r.status === "failed" || r.status === "generating")).length,
     [rows, selected],
   );
   const selectedQueuedCount = useMemo(
@@ -167,9 +170,9 @@ export function QueuePage({ active }: { active: boolean }) {
               <Sparkles size={16} />
             </IconButton>
             <IconButton
-              title={`Retry ${selectedFailedCount} selected`}
-              badge={selectedFailedCount}
-              disabled={selectedFailedCount === 0 || bulkRetryMutation.isPending}
+              title={`Retry ${selectedRetryableCount} selected`}
+              badge={selectedRetryableCount}
+              disabled={selectedRetryableCount === 0 || bulkRetryMutation.isPending}
               onClick={() => bulkRetryMutation.mutate([...selected])}
             >
               <RotateCcw size={16} />
@@ -233,7 +236,7 @@ export function QueuePage({ active }: { active: boolean }) {
                     </IconButton>
                     <IconButton
                       title="Retry"
-                      disabled={o.status !== "failed"}
+                      disabled={o.status !== "failed" && o.status !== "generating"}
                       onClick={() => retryMutation.mutate(o.id)}
                     >
                       <RotateCcw size={16} />
