@@ -1,9 +1,19 @@
 """Orchestrates one opportunity's `queued -> generating -> ready/failed`
-pipeline: build a prompt from the profile's prompt.md + the JD, ask
-ChatGPT for resume_json, validate it, substitute the profile's real contact
-fields, render through the existing Phase 2 template/PDF pipeline
-(resume_render.py), and land the result in staging - the same place
-Applied (queue.py) already knows how to pick up from.
+pipeline: fill the profile's own prompt.md placeholders with real values,
+ask ChatGPT for resume_json, validate it, render through the existing
+Phase 2 template/PDF pipeline (resume_render.py), and land the result in
+staging - the same place Applied (queue.py) already knows how to pick up
+from.
+
+Per the user's correction: prompt.md is the single source of truth for
+both the tailoring instructions *and* the exact JSON schema to return (see
+a real profile's prompt.md - it already has its own "CANDIDATE" block with
+`{NAME}`/`{LOCATION}`/etc. and its own "JSON SCHEMA - REQUIRED" section).
+This module's job is narrower than an earlier version of it assumed: fill
+in the placeholders prompt.md already defines with real values *before*
+sending, trust the schema instructions already in there, and use whatever
+comes back as-is - no separate instructions appended on the way in, no
+overwriting contact fields on the way out.
 
 A single in-process background worker consumes an `asyncio.Queue` of
 opportunity ids, one at a time - there's only one ChatGPT browser/
@@ -26,36 +36,34 @@ from . import chatgpt_engine
 from . import profiles as profiles_module
 from . import templates as templates_module
 from .db import get_conn
-from .models import Profile
 from .resume_render import render_html, render_pdf
 from .resume_schema import ResumeJson
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 STAGING_DIR = DATA_DIR / "staging"
 
-# Contact fields are asked for as literal placeholder tokens, matching
-# docs/ARCHITECTURE.md's "Why this shape": contact info never enters the
-# LLM's actual judgment, it's substituted by the app afterward regardless
-# of what came back (see _substitute_contact below) - not a find/replace
-# over the JSON text, a direct overwrite, so a stray literal "{NAME}" in
-# free text elsewhere can never get mis-replaced.
-_SCHEMA_INSTRUCTIONS = """Return ONLY a single JSON object (inside a ```json code fence, nothing else - no chat, no explanation before or after) matching exactly this shape:
 
-{
-  "name": "{NAME}", "title": "<a resume headline tailored to this job>", "location": "{LOCATION}",
-  "phone": "{PHONE}", "email": "{EMAIL}", "linkedin": "{LINKEDIN}",
-  "summary": "<2-3 sentence professional summary tailored to this job>",
-  "skills": [{"category": "...", "items": "comma-separated list"}],
-  "experience": [{"company": "...", "location": "...", "title": "...", "dates": "...", "project": "", "bullets": ["...", "..."]}],
-  "education": [{"school": "...", "degree": "...", "year": "...", "details": ""}],
-  "certifications": ["..."]
-}
-
-Keep the literal placeholder tokens {NAME}, {LOCATION}, {PHONE}, {EMAIL}, {LINKEDIN} exactly as shown above, character for character - do not fill them in with real values. Everything else should be real, tailored content."""
-
-
-def build_prompt(prompt_md: str, job_description: str) -> str:
-    return f"{prompt_md}\n\n---\nJob description:\n{job_description}\n\n---\n{_SCHEMA_INSTRUCTIONS}"
+def build_prompt(prompt_md: str, name: str, location: str, phone: str, email: str,
+                  linkedin: str, job_title: str, company: str, job_description: str) -> str:
+    """Fills in whichever of prompt.md's own placeholder tokens are
+    present, with real values - the prompt is the source of truth for the
+    schema and tailoring instructions, this just resolves what it's
+    already asking for. `{JD}` is guaranteed to end up in the prompt one
+    way or another: substituted in place if prompt.md uses that token,
+    appended otherwise, so a simpler prompt.md that doesn't follow this
+    convention still gets the job description at all."""
+    text = prompt_md
+    for token, value in {
+        "{NAME}": name, "{LOCATION}": location, "{PHONE}": phone,
+        "{EMAIL}": email, "{LINKEDIN}": linkedin,
+        "{JOB_TITLE}": job_title, "{COMPANY}": company,
+    }.items():
+        text = text.replace(token, value)
+    if "{JD}" in text:
+        text = text.replace("{JD}", job_description)
+    else:
+        text = f"{text}\n\n---\nJob description:\n{job_description}"
+    return text
 
 
 _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.S)
@@ -85,16 +93,6 @@ def parse_resume_json(reply: str) -> ResumeJson:
         raise ValueError(f"ChatGPT's reply didn't match the resume schema: {exc}") from exc
 
 
-def _substitute_contact(resume: ResumeJson, profile: Profile) -> ResumeJson:
-    return resume.model_copy(update={
-        "name": profile.name,
-        "location": profile.location,
-        "phone": profile.phone,
-        "email": profile.email,
-        "linkedin": profile.linkedin,
-    })
-
-
 def _safe_filename(s: str) -> str:
     return "".join(c for c in s if c not in '\\/:*?"<>|').strip()
 
@@ -111,11 +109,13 @@ async def run_generation(opp_id: int) -> None:
     try:
         profile = profiles_module.get_profile(row["profile"])
         prompt_md = profiles_module.get_prompt(row["profile"])
-        prompt = build_prompt(prompt_md, row["description"])
+        prompt = build_prompt(
+            prompt_md, profile.name, profile.location, profile.phone, profile.email,
+            profile.linkedin, row["title"], row["company"], row["description"],
+        )
 
         reply = await chatgpt_engine.ask(prompt)
         resume = parse_resume_json(reply)
-        resume = _substitute_contact(resume, profile)
 
         template_html = templates_module.get_html(profile.template_id)
         fields = resume.model_dump()

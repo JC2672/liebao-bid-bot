@@ -408,18 +408,29 @@ into the next - simpler, and doesn't depend on a toggle that's itself a
 selector-fragile moving target.
 
 **`resume_schema.py` + `generation.py`** - ChatGPT is asked to return a
-single JSON object (schema below) instead of a raw HTML document like the
-sibling project's own prompt does; validated structurally with Pydantic
+single JSON object instead of a raw HTML document like the sibling
+project's own prompt does; validated structurally with Pydantic
 (`ResumeJson.model_validate`), not the string-heuristic approach ("starts
 with `<html>`, length > 500, no refusal phrases") that project uses for its
 free-form output - real schema validation was only possible for us because
 Phase 2 already built a real `resume_json` contract and Jinja2 template,
-which didn't exist yet when that approach was written. Contact fields
-(`name`/`location`/`phone`/`email`/`linkedin`) are asked for as literal
-placeholder tokens and then **overwritten** directly from the profile
-regardless of what ChatGPT actually returned there - not a find/replace
-over the JSON text, since that could mis-fire on a stray literal token
-elsewhere in free text.
+which didn't exist yet when that approach was written.
+
+**`profile.prompt.md` is the single source of truth for both the
+tailoring instructions and the exact JSON schema to return** - not
+something this project injects. An earlier version of `generation.py`
+assumed otherwise (appending its own schema instructions, then
+overwriting the LLM's contact fields with the profile's afterward), before
+the user corrected it: a real prompt.md already defines its own
+placeholder tokens (`{NAME}`, `{LOCATION}`, `{PHONE}`, `{EMAIL}`,
+`{LINKEDIN}`, `{JOB_TITLE}`, `{COMPANY}`, `{JD}`) and its own "JSON SCHEMA
+- REQUIRED" section. `build_prompt()`'s job is narrower than that first
+version assumed: substitute whichever of those tokens are present with
+real values *before* sending (`{JD}` is guaranteed to end up in the prompt
+either way - substituted in place if present, appended otherwise, so a
+simpler prompt.md that doesn't use the convention still gets the job
+description at all), then use whatever comes back as-is - no separate
+instructions appended, no overwriting the output afterward.
 
 A single in-process background worker (`generation.start_worker()`,
 started from `main.py`'s existing startup event) consumes an
