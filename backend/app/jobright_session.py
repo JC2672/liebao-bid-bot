@@ -1,19 +1,20 @@
-"""Jobright login session, held in the user's REAL browser - not a separate
-automation profile (an earlier version of this used a dedicated Playwright-
-managed Chromium window the user had to log into a second time; that was the
-wrong shape for this and has been replaced).
+"""Jobright login session, held in a dedicated Playwright-managed browser
+profile (see jobright_browser.py) - not the companion Chrome extension this
+project used for one stretch (see docs/ARCHITECTURE.md's "Login-gated
+sources" section for that history; the mechanism has flip-flopped once
+already, so check git log here before assuming either is "the" design).
 
 Flow:
-  1. The companion Chrome extension (extension/) reads the user's actual
-     jobright.ai cookies from their own already-open Chrome via
-     chrome.cookies, which only an extension can do - an ordinary web page
-     can't read another origin's cookies itself.
-  2. The extension POSTs those cookies to /sources/jobright/cookies here,
-     which saves them and reports back whether they actually work.
+  1. jobright_browser.py opens its own dedicated Chrome profile, waits for
+     the user to sign in if needed, then reads real jobright.ai cookies off
+     that browser context (`context.cookies()`).
+  2. save_cookies() below saves them - it only cares about the
+     `[{"name", "value", "domain"}, ...]` shape, which is exactly what
+     `context.cookies()` returns, whatever obtained it.
   3. jobright_source.py loads the saved cookies and attaches them as a plain
      Cookie header on ordinary `requests` calls to Jobright's real internal
-     API - no browser involved in the fetch itself, only in obtaining the
-     cookies in the first place.
+     API - no live browser involved in the fetch itself, only in obtaining
+     the cookies in the first place.
 
 check_session() makes one cheap real request rather than trusting that a
 saved file merely exists: confirmed live that Jobright's real API returns a

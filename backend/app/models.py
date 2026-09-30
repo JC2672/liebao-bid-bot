@@ -88,7 +88,12 @@ class Profile(BaseModel):
     phone: str = ""
     email: str = ""
     linkedin: str = ""
-    sheet_id: str = ""
+    # Applied tracking goes through a Google Apps Script Web App bound to
+    # the profile's Sheet, not a service account - see sheets.py's module
+    # docstring. `sheet_secret` is checked by that script so a leaked URL
+    # alone can't be used to write rows into someone's sheet.
+    sheet_webapp_url: str = ""
+    sheet_secret: str = ""
     sheet_tab: str
     output_root: str
     # A live reference to templates/<template_id>/, not a per-profile copy -
@@ -114,7 +119,8 @@ class ProfileInput(BaseModel):
     phone: str = ""
     email: str = ""
     linkedin: str = ""
-    sheet_id: str = ""
+    sheet_webapp_url: str = ""
+    sheet_secret: str = ""
     sheet_tab: str
     output_root: str
     template_id: str = "default"

@@ -32,7 +32,8 @@ export interface Profile {
   phone: string;
   email: string;
   linkedin: string;
-  sheet_id: string;
+  sheet_webapp_url: string;
+  sheet_secret: string;
   sheet_tab: string;
   output_root: string;
   template_id: string;
@@ -48,7 +49,8 @@ export interface ProfileInput {
   phone: string;
   email: string;
   linkedin: string;
-  sheet_id: string;
+  sheet_webapp_url: string;
+  sheet_secret: string;
   sheet_tab: string;
   output_root: string;
   template_id: string;
@@ -250,5 +252,15 @@ export async function bulkGenerate(ids: number[]) {
 
 export async function openFolder(id: number) {
   await api.post(`/queue/${id}/open-folder`);
+}
+
+export async function checkJobrightStatus(): Promise<{ logged_in: boolean }> {
+  const { data } = await api.get("/sources/jobright/status");
+  return data;
+}
+
+export async function triggerJobrightLogin(): Promise<{ started: boolean }> {
+  const { data } = await api.post("/sources/jobright/login");
+  return data;
 }
 

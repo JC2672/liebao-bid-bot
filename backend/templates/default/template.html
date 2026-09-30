@@ -1,149 +1,193 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ name }} | Resume</title>
 <style>
   @page { size: Letter; margin: 0; }
 
   :root {
-    --ink: #1c1a17;
-    --muted: #5b564d;
-    --rule: #c7c0b0;
+    color-scheme: light;
+    --ink: #202b32;
+    --muted: #53636b;
+    --accent: #24676a;
+    --rule: #d5e0e1;
+    --wash: #f2f6f6;
   }
 
   * { box-sizing: border-box; }
 
+  html { background: #e9edef; }
+
   body {
+    margin: 0;
+    padding: 0.52in 0.62in;
+    color: var(--ink);
+    background: #fff;
     font-family: Calibri, "Segoe UI", Arial, sans-serif;
     font-size: 10.3pt;
-    line-height: 1.42;
-    color: var(--ink);
-    margin: 0;
-    /* Page margin lives here, not in Playwright's page.pdf() margin option,
-       so a plain HTML preview (the Templates tab's card/iframe) actually
-       matches the real PDF instead of showing content flush to the edges -
-       resume_render.render_pdf() passes margin=0 for exactly this reason. */
-    padding: 0.6in 0.65in;
+    line-height: 1.43;
+    overflow-wrap: break-word;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .name {
+    margin: 0 0 3pt;
+    padding-top: 11pt;
+    border-top: 3pt solid var(--accent);
     font-family: Cambria, Georgia, "Times New Roman", serif;
-    font-size: 26pt;
+    font-size: 29pt;
     font-weight: 700;
-    letter-spacing: -0.01em;
-    margin: 0 0 3pt 0;
+    line-height: 1.12;
+    letter-spacing: -0.025em;
+    break-after: avoid;
   }
 
   .headline {
+    margin: 0 0 7pt;
+    color: var(--accent);
     font-size: 11.5pt;
-    color: var(--muted);
-    margin: 0 0 5pt 0;
+    font-weight: 600;
+    line-height: 1.35;
+    break-after: avoid;
   }
 
   .contact {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3pt 0;
+    margin: 0 0 14pt;
+    padding-bottom: 11pt;
+    border-bottom: 0.75pt solid var(--rule);
     color: var(--muted);
-    font-size: 9.3pt;
-    margin-bottom: 14pt;
+    font-size: 9pt;
+    line-height: 1.45;
+    break-after: avoid;
   }
+
+  .contact span { max-width: 100%; overflow-wrap: anywhere; }
   .contact span + span::before {
     content: "\00a0\00a0\2022\00a0\00a0";
-    color: var(--rule);
+    color: var(--accent);
   }
 
   h2 {
-    font-family: Calibri, "Segoe UI", Arial, sans-serif;
-    font-size: 9.7pt;
+    display: flex;
+    align-items: center;
+    gap: 10pt;
+    margin: 14pt 0 6pt;
+    color: var(--accent);
+    font-size: 9.2pt;
     font-weight: 700;
+    line-height: 1.35;
     text-transform: uppercase;
-    letter-spacing: 0.11em;
-    color: var(--ink);
-    margin: 15pt 0 6pt 0;
-    padding-bottom: 3pt;
-    border-bottom: 1pt solid var(--rule);
+    letter-spacing: 0.13em;
     break-after: avoid;
   }
-  h2:first-of-type { margin-top: 0; }
 
-  .summary {
-    margin: 0 0 2pt 0;
+  h2::after {
+    content: "";
+    flex: 1;
+    height: 0.75pt;
+    background: var(--rule);
   }
+
+  h2:first-of-type { margin-top: 0; }
+  .summary { margin: 0; }
 
   .skills-grid {
     display: grid;
-    grid-template-columns: max-content 1fr;
-    column-gap: 8pt;
-    row-gap: 2.5pt;
-  }
-  .skills-grid .cat {
-    font-weight: 700;
-    white-space: nowrap;
-  }
-  .skills-grid .items {
-    color: var(--ink);
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 12pt;
+    row-gap: 4pt;
+    padding: 8pt 10pt;
+    border-left: 2pt solid var(--accent);
+    border-radius: 0 3pt 3pt 0;
+    background: var(--wash);
+    font-size: 9.8pt;
   }
 
-  .entry {
-    margin-bottom: 10pt;
-    break-inside: avoid;
-  }
+  .skills-grid .cat { font-weight: 700; }
+  .skills-grid .items { min-width: 0; }
+
+  .entry { margin-bottom: 9pt; break-inside: avoid; }
   .entry-header {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
     gap: 10pt;
+    break-after: avoid;
   }
-  .entry-title {
-    font-weight: 700;
-  }
-  .entry-sub {
-    color: var(--muted);
-    font-size: 9.6pt;
-    margin-top: 0.5pt;
-    margin-bottom: 3pt;
-  }
+
+  .entry-title { font-size: 10.5pt; font-weight: 700; }
   .entry-dates {
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: 9pt;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .entry-sub {
+    margin: 1pt 0 4pt;
     color: var(--muted);
     font-size: 9.3pt;
-    white-space: nowrap;
-    flex-shrink: 0;
+    break-after: avoid;
   }
+
   .entry-project {
+    margin: 0 0 4pt;
+    color: var(--muted);
+    font-size: 9.6pt;
     font-style: italic;
-    color: var(--muted);
-    margin-bottom: 3pt;
+    break-after: avoid;
   }
 
-  ul.bullets {
-    margin: 0;
-    padding-left: 13pt;
-  }
-  ul.bullets li {
-    margin-bottom: 2.5pt;
-  }
-  ul.bullets li::marker {
-    color: var(--rule);
+  ul.bullets, .cert-list { margin: 0; padding-left: 13pt; }
+  ul.bullets li { margin-bottom: 3pt; padding-left: 2pt; }
+  ul.bullets li:last-child, .cert-list li:last-child { margin-bottom: 0; }
+  ul.bullets li::marker, .cert-list li::marker { color: var(--accent); }
+  li { orphans: 2; widows: 2; }
+  p { orphans: 3; widows: 3; }
+
+  .edu-entry { margin-bottom: 5pt; break-inside: avoid; }
+  .edu-degree { font-weight: 700; }
+  .edu-meta { color: var(--muted); }
+  .cert-list li { margin-bottom: 3pt; padding-left: 2pt; }
+
+  a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: 2px; }
+  a:hover { color: var(--accent); }
+
+  @media screen {
+    body {
+      width: 8.5in;
+      max-width: calc(100% - 40px);
+      min-height: 11in;
+      margin: 28px auto;
+      box-shadow: 0 8px 36px rgb(32 43 50 / 10%);
+    }
   }
 
-  .edu-entry {
-    margin-bottom: 4pt;
-  }
-  .edu-degree {
-    font-weight: 700;
-  }
-  .edu-meta {
-    color: var(--muted);
+  @media screen and (max-width: 600px) {
+    html { background: #fff; }
+    body { width: 100%; max-width: 100%; min-height: 100vh; margin: 0; padding: 26px 22px; box-shadow: none; }
+    .name { font-size: 26pt; }
+    .contact { display: block; }
+    .contact span { display: block; margin-top: 3pt; }
+    .contact span + span::before { content: none; }
+    .entry-header { flex-direction: column; gap: 1pt; }
+    .entry-dates { white-space: normal; }
+    .skills-grid { grid-template-columns: minmax(0, 1fr); row-gap: 2pt; }
+    .skills-grid .cat:not(:first-child) { margin-top: 5pt; }
   }
 
-  .cert-list {
-    margin: 0;
-    padding-left: 13pt;
+  @media print {
+    html { background: #fff; }
+    body { width: auto; max-width: none; min-height: 0; margin: 0; box-shadow: none; }
   }
-  .cert-list li {
-    margin-bottom: 2pt;
-  }
-  .cert-list li::marker {
-    color: var(--rule);
-  }
+
 </style>
 </head>
 <body>

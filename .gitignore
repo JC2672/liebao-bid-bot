@@ -23,7 +23,6 @@ backend/profiles/*/
 
 # Secrets / config
 .env
-**/service-account.json
 **/settings.local.json
 
 # Editor/OS

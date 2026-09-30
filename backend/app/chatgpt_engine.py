@@ -44,9 +44,6 @@ completely - this works the same whether or not `--reload` is on.
 from __future__ import annotations
 
 import asyncio
-import os
-import re
-import subprocess
 import sys
 import threading
 import time
@@ -54,7 +51,9 @@ from pathlib import Path
 from typing import Callable
 
 import pyperclip
-from playwright.async_api import Browser, BrowserContext, Locator, Page, Playwright, async_playwright
+from playwright.async_api import BrowserContext, Locator, Page, Playwright, async_playwright
+
+from . import browser_launch
 
 # Called with a short human-readable progress note (currently just the
 # login wait) - see ask()'s docstring.
@@ -165,8 +164,23 @@ def _ensure_thread() -> asyncio.AbstractEventLoop:
     return _thread_loop
 
 
-async def ask(prompt: str, new_chat: bool = True, on_status: StatusCallback = None) -> str:
-    """Send one prompt, return ChatGPT's reply text.
+async def ask(parts: list[str], new_chat: bool = True, on_status: StatusCallback = None) -> str:
+    """Send a prompt as one or more separate chat turns, return the reply
+    text from the LAST turn only.
+
+    `parts` (the profile prompt, then the job description, typically) are
+    sent as separate messages - send the first, wait for ChatGPT to fully
+    finish responding to it, send the next, and so on - rather than pasted
+    together into one giant message. Confirmed live as a real failure mode:
+    a single huge paste is what triggers ChatGPT's own heuristic to convert
+    a long paste into a .txt attachment instead of composer text, and that
+    conversion isn't reliably atomic under slow network/render conditions -
+    it can leave an attachment *and* leftover raw text, or land late and
+    end up duplicated underneath a fallback that assumed the paste had
+    failed. Splitting into smaller, separately-sent messages keeps any
+    single paste well clear of whatever triggers that, and there's no
+    "reply" to get wrong for the earlier turns - only the final turn's
+    answer is read and returned.
 
     Runs on the dedicated Playwright thread (see module docstring for why),
     bridged back into the caller's own event loop via
@@ -184,14 +198,14 @@ async def ask(prompt: str, new_chat: bool = True, on_status: StatusCallback = No
     the callback shouldn't take down the actual generation.
     """
     loop = _ensure_thread()
-    future = asyncio.run_coroutine_threadsafe(_ask_on_thread(prompt, new_chat, on_status), loop)
+    future = asyncio.run_coroutine_threadsafe(_ask_on_thread(parts, new_chat, on_status), loop)
     return await asyncio.wrap_future(future)
 
 
-async def _ask_on_thread(prompt: str, new_chat: bool, on_status: StatusCallback) -> str:
+async def _ask_on_thread(parts: list[str], new_chat: bool, on_status: StatusCallback) -> str:
     assert _lock is not None
     async with _lock:
-        return await _converse(prompt, new_chat, on_status)
+        return await _converse(parts, new_chat, on_status)
 
 
 def _report(on_status: StatusCallback, message: str) -> None:
@@ -203,7 +217,7 @@ def _report(on_status: StatusCallback, message: str) -> None:
         pass
 
 
-async def _converse(prompt: str, new_chat: bool, on_status: StatusCallback) -> str:
+async def _converse(parts: list[str], new_chat: bool, on_status: StatusCallback) -> str:
     global _context, _page
     try:
         if _context is None or not _context.pages:
@@ -223,23 +237,40 @@ async def _converse(prompt: str, new_chat: bool, on_status: StatusCallback) -> s
         # Nothing is typed or pasted into the composer until this resolves
         # either way - the whole point is that a login prompt never gets a
         # job description silently thrown at it.
-        if await _visible(page, LOGIN_BUTTON):
+        if await browser_launch.visible(page, LOGIN_BUTTON):
             box = await _wait_for_login(page, on_status)
         else:
-            box = await _find(page, COMPOSER, timeout=15000)
+            box = await browser_launch.find(page, COMPOSER, timeout=15000)
             if box is None:
                 box = await _wait_for_login(page, on_status)
 
-        await box.click()
-        await _fill(page, prompt)
+        multi_turn = len(parts) > 1
+        for i, part in enumerate(parts):
+            is_last = i == len(parts) - 1
+            if i > 0:
+                # Sent already; ChatGPT clears/refocuses its own composer on
+                # send, so this is just re-finding the same box, fresh.
+                box = await browser_launch.find(page, COMPOSER, timeout=15000)
+                if box is None:
+                    raise ChatError("ChatGPT's message box disappeared mid-conversation - look at the browser window.")
 
-        send = await _find(page, SEND, timeout=4000)
-        if send is not None:
-            await send.click()
-        else:
-            await page.keyboard.press("Enter")
+            await box.click()
+            await _fill_one(page, part)
 
-        return await _await_reply(page)
+            send = await browser_launch.find(page, SEND, timeout=4000)
+            if send is not None:
+                await send.click()
+            else:
+                await page.keyboard.press("Enter")
+
+            if is_last:
+                return await _await_reply(page)
+
+            if multi_turn:
+                _report(on_status, "Sent the prompt - waiting for ChatGPT before sending the job description...")
+            await _wait_for_turn_complete(page)
+
+        raise ChatError("Nothing to send.")  # unreachable: parts always has at least one item
     except ChatError:
         raise
     except Exception as exc:
@@ -252,8 +283,8 @@ async def _wait_for_login(page: Page, on_status: StatusCallback) -> Locator:
     _report(on_status, "Waiting for you to sign in to ChatGPT - check the browser window that opened.")
     deadline = time.time() + LOGIN_WAIT
     while time.time() < deadline:
-        if not await _visible(page, LOGIN_BUTTON):
-            box = await _find(page, COMPOSER, timeout=3000)
+        if not await browser_launch.visible(page, LOGIN_BUTTON):
+            box = await browser_launch.find(page, COMPOSER, timeout=3000)
             if box is not None:
                 _report(on_status, "Signed in - continuing.")
                 return box
@@ -272,187 +303,71 @@ async def _wait_for_login(page: Page, on_status: StatusCallback) -> Locator:
 async def _open() -> tuple[BrowserContext, Page]:
     """A Chrome window signed into ChatGPT, reusing the saved profile."""
     global _playwright
-    USER_DATA.mkdir(parents=True, exist_ok=True)
     if _playwright is None:
         _playwright = await async_playwright().start()
-
-    reconnected = await _reconnect(_playwright)
-    if reconnected is not None:
-        context, page = reconnected
-        page.set_default_timeout(30000)
-        return context, page
-
-    context, failures = None, []
-    for attempt in (1, 2):
-        round_errors = []
-        for channel in ("chrome", "msedge", None):
-            try:
-                context = await _launch(_playwright, channel)
-                break
-            except Exception as exc:  # noqa: BLE001 - tried across channels below
-                round_errors.append(exc)
-                context = None
-        if context is not None:
-            break
-        failures = round_errors
-        # A locked profile is the usual first failure, and clearing it is
-        # exactly what lets the second attempt through.
-        if attempt == 1 and any(_locked(e) for e in round_errors):
-            _close_orphans()
-        else:
-            break
-
-    if context is None:
-        raise ChatError(_why(failures))
-
-    page = context.pages[0] if context.pages else await context.new_page()
-    page.set_default_timeout(30000)
-    return context, page
-
-
-async def _reconnect(play: Playwright) -> tuple[BrowserContext, Page] | None:
-    """Reuse a window a prior run left open, rather than fighting it -
-    important here since `uvicorn --reload` restarts the backend process
-    (and would otherwise re-launch a new Chrome, leaving the old one
-    orphaned and the profile locked) on every source file save."""
     try:
-        browser: Browser = await play.chromium.connect_over_cdp(f"http://127.0.0.1:{CDP_PORT}", timeout=4000)
-    except Exception:  # noqa: BLE001 - no window to reattach to, fall through to a fresh launch
-        return None
-
-    try:
-        context = browser.contexts[0] if browser.contexts else await browser.new_context()
-        page = context.pages[0] if context.pages else await context.new_page()
-        return context, page
-    except Exception:  # noqa: BLE001 - reattach failed; a fresh launch is the fallback
-        try:
-            await browser.close()
-        except Exception:  # noqa: BLE001 - already gone
-            pass
-        return None
-
-
-async def _launch(play: Playwright, channel: str | None) -> BrowserContext:
-    return await play.chromium.launch_persistent_context(
-        str(USER_DATA), headless=False, channel=channel, viewport=None,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--start-maximized",
-            f"--remote-debugging-port={CDP_PORT}",
-        ],
-    )
-
-
-def _locked(exc: Exception) -> bool:
-    text = str(exc or "").lower()
-    return "already in use" in text or "existing browser session" in text or "singletonlock" in text
-
-
-def _close_orphans() -> None:
-    """Shut any browser still holding this project's ChatGPT profile.
-
-    Matched on the profile path, so only windows this project started are
-    touched - an everyday Chrome session is never disturbed. A blocking
-    subprocess call, accepted here since this only runs on the rare
-    profile-locked recovery path, not on every request.
-    """
-    script = (
-        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe' or "
-        "Name='msedge.exe'\" | Where-Object { $_.CommandLine -like '*%s*' } | "
-        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-        % str(USER_DATA).replace("'", "''")
-    )
-    try:
-        subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except Exception:  # noqa: BLE001 - best-effort cleanup only
-        pass
-
-    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
-        try:
-            os.remove(USER_DATA / name)
-        except OSError:
-            pass
-
-
-def _why(failures: list[Exception]) -> str:
-    if any(_locked(e) for e in failures):
-        return (
-            "A ChatGPT browser window from an earlier run is still holding "
-            "the profile, and it could not be closed automatically. Close "
-            "every Chrome window this project opened, then try again."
-        )
-    ranked = [e for e in failures if "Executable doesn't exist" not in str(e)] or failures
-    text = str(ranked[0]) if ranked else "unknown error"
-    if "Executable doesn't exist" in text or "playwright install" in text:
-        return (
-            "No usable browser. Install Google Chrome, or get Playwright's "
-            "own with:\n\n    python -m playwright install chromium"
-        )
-    return f"Could not start a browser:\n\n{text[:300]}"
+        return await browser_launch.open_persistent_context(_playwright, USER_DATA, CDP_PORT)
+    except browser_launch.LaunchError as exc:
+        raise ChatError(str(exc)) from exc
 
 
 # ── Finding elements, filling the composer, reading the reply ───────────
 
 
-async def _find(page: Page, selectors: list[str], timeout: int = 8000) -> Locator | None:
-    """First selector that's actually on the page.
+async def _wait_for_turn_complete(page: Page) -> None:
+    """Wait for ChatGPT to fully finish responding to the message just
+    sent - the Stop button gone, and staying gone for a settle period -
+    without reading or caring about that reply's text. Used between turns
+    of a multi-part prompt sent as separate messages (the profile prompt,
+    then the job description) rather than one combined message; only the
+    LAST turn's reply is the one this project actually wants."""
+    deadline = time.time() + REPLY_WAIT
+    settled_since = None
+    while time.time() < deadline:
+        if await browser_launch.visible(page, STOP):
+            settled_since = None
+        else:
+            if settled_since is None:
+                settled_since = time.time()
+            elif time.time() - settled_since >= SETTLE:
+                return
+        await asyncio.sleep(0.5)
+    raise ChatError(
+        f"ChatGPT never finished responding to the prompt message within "
+        f"{REPLY_WAIT} seconds, so the job description was never sent. Look "
+        "at the browser window."
+    )
 
-    ChatGPT renames things, so each selector gets a short look before the
-    next is tried, and only the last round is given the full wait -
-    otherwise a name that no longer exists burns the whole budget before
-    the one that works is even reached.
+
+async def _fill_one(page: Page, text: str) -> None:
+    """Get one message's worth of text into the composer, and prove it's
+    there.
+
+    A message here can run to tens of thousands of characters. Pasting is
+    much the fastest way in, but a long paste can silently be turned into
+    an attached file instead of composer text - confirmed live,
+    inconsistently, especially under slow network/render conditions, where
+    the conversion can leave an attachment *and* leftover raw composer
+    text, or land late and end up duplicated underneath a typed fallback
+    that assumed the paste had failed outright. Sending the prompt as
+    smaller separate messages (see `ask`'s docstring) rather than one giant
+    one already reduces how often any single paste is large enough to trip
+    that in the first place; what landed is still measured here regardless,
+    and typing is the fallback if it didn't.
     """
-    quick = min(1200, timeout)
-    for round_timeout in (quick, timeout):
-        for selector in selectors:
-            try:
-                found = page.locator(selector).first
-                await found.wait_for(state="visible", timeout=round_timeout)
-                return found
-            except Exception:  # noqa: BLE001 - try the next selector/round
-                continue
-        if round_timeout >= timeout:
-            break
-    return None
-
-
-async def _visible(page: Page, selectors: list[str]) -> bool:
-    for selector in selectors:
-        try:
-            if await page.locator(selector).first.is_visible(timeout=400):
-                return True
-        except Exception:  # noqa: BLE001 - try the next selector
-            continue
-    return False
-
-
-async def _fill(page: Page, prompt: str) -> None:
-    """Get the whole prompt into the message box, and prove that it's there.
-
-    A resume prompt (the profile's own prompt.md, with its placeholders
-    filled in, plus the JD) can run to tens of thousands of characters.
-    Pasting is much the fastest way in, but a long paste can silently be
-    turned into an attached file instead of composer text - so what landed
-    is measured, and typing is the fallback.
-    """
-    wanted = len(prompt.strip())
+    wanted = len(text.strip())
 
     async def landed() -> int:
         return len((await _composer_text(page)).strip())
 
-    # Always start from an empty box - confirmed live as a real bug
-    # without this: on a composer that already had leftover content (a
-    # stale render, a previous attempt's text), pasting *added* to it
-    # instead of replacing it, which is how a prompt ended up sent three
-    # times over in a single message.
+    # Always start from an empty box - matters most for the very first
+    # message (a stale render, a previous attempt's leftover text); later
+    # turns already start from an empty composer since ChatGPT clears its
+    # own on send, so this is a harmless no-op then.
     await _clear(page)
 
     try:
-        pyperclip.copy(prompt)
+        pyperclip.copy(text)
         await page.keyboard.press("Control+V")
         for _ in range(20):  # a big paste takes a moment to render
             await asyncio.sleep(0.3)
@@ -467,8 +382,8 @@ async def _fill(page: Page, prompt: str) -> None:
     # Type it, in pieces so the editor keeps up.
     await _clear(page)
     step = 2000
-    for at in range(0, len(prompt), step):
-        await page.keyboard.insert_text(prompt[at:at + step])
+    for at in range(0, len(text), step):
+        await page.keyboard.insert_text(text[at:at + step])
         await asyncio.sleep(0.05)
     await asyncio.sleep(0.8)
 
@@ -478,9 +393,9 @@ async def _fill(page: Page, prompt: str) -> None:
 
     raise ChatError(
         f"Only {got:,} of the {wanted:,} characters reached the ChatGPT box, "
-        "so the job description would have been cut short. Nothing was "
-        "sent. This usually means ChatGPT turned the paste into an "
-        "attachment - try again, or shorten the prompt."
+        "so the message would have been cut short. Nothing was sent. This "
+        "usually means ChatGPT turned the paste into an attachment - try "
+        "again, or shorten the prompt."
     )
 
 
@@ -525,7 +440,7 @@ async def _await_reply(page: Page) -> str:
     last_text, steady_since = "", None
 
     while time.time() < deadline:
-        streaming = await _visible(page, STOP)
+        streaming = await browser_launch.visible(page, STOP)
         if streaming:
             started = True
 

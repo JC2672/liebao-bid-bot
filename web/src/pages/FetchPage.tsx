@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Download } from "lucide-react";
-import { exportShortlist, runFetch, sourceIconUrl, SOURCE_OPTIONS, type FetchCounts, type GateResult } from "../lib/api";
-import { checkJobrightSession, isExtensionInstalled, openJobrightLoginTab } from "../lib/extensionBridge";
+import {
+  checkJobrightStatus,
+  exportShortlist,
+  runFetch,
+  sourceIconUrl,
+  SOURCE_OPTIONS,
+  triggerJobrightLogin,
+  type FetchCounts,
+  type GateResult,
+} from "../lib/api";
 import { LoadingOverlay } from "../components/LoadingOverlay";
 import { Badge, Button, Card, FlagBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
@@ -97,16 +105,18 @@ export function FetchPage() {
   const [jobrightNotice, setJobrightNotice] = useState<string | null>(null);
 
   const jobrightSelected = sources.includes("jobright");
-  // Live status badge - reads the user's REAL browser session via the
-  // companion extension (see lib/extensionBridge.ts), not a separate
-  // automation profile. Re-checked fresh right before every fetch too.
+  // Live status badge - reads the dedicated Jobright browser profile's
+  // session (see backend/app/jobright_browser.py), checked via a real
+  // request to Jobright's own API (jobright_session.check_session()), not
+  // just "was a cookie file saved". Polls while selected and not yet
+  // signed in, so the badge flips on its own once the user finishes
+  // signing in in the window Run Fetch opened - no need to click Run
+  // Fetch again just to re-check.
   const jobrightStatusQuery = useQuery({
-    queryKey: ["jobright-session"],
-    queryFn: async () => {
-      if (!(await isExtensionInstalled())) return { extension: false, loggedIn: false };
-      return { extension: true, loggedIn: await checkJobrightSession() };
-    },
+    queryKey: ["jobright-status"],
+    queryFn: checkJobrightStatus,
     enabled: jobrightSelected,
+    refetchInterval: (query) => (jobrightSelected && !query.state.data?.logged_in ? 3000 : false),
   });
 
   const fetchMutation = useMutation({
@@ -147,20 +157,14 @@ export function FetchPage() {
 
     setJobrightNotice(null);
     if (jobrightSelected) {
-      if (!(await isExtensionInstalled())) {
+      const status = await checkJobrightStatus();
+      queryClient.setQueryData(["jobright-status"], status);
+      if (!status.logged_in) {
+        await triggerJobrightLogin();
         setJobrightNotice(
-          "Companion extension not detected - continuing with Jobright's anonymous access only (limited to ~20 results, and may currently be blocked - see Profiles/docs).",
+          "Opened a Jobright sign-in window - sign in there. The badge above will update on its own once you're signed in.",
         );
-      } else {
-        const loggedIn = await checkJobrightSession();
-        queryClient.setQueryData(["jobright-session"], { extension: true, loggedIn });
-        if (!loggedIn) {
-          await openJobrightLoginTab();
-          setJobrightNotice(
-            "Opened a Jobright sign-in tab in your browser - sign in there, then click Run Fetch again.",
-          );
-          return; // don't fetch this round - wait for the user to actually sign in
-        }
+        return; // don't fetch this round - wait for the user to actually sign in
       }
     }
 
@@ -206,13 +210,11 @@ export function FetchPage() {
             {jobrightSelected && (
               <div className="mt-2">
                 {jobrightStatusQuery.isLoading ? (
-                  <Badge>Jobright: checking your browser…</Badge>
-                ) : !jobrightStatusQuery.data?.extension ? (
-                  <Badge tone="warn">Jobright: companion extension not detected</Badge>
-                ) : jobrightStatusQuery.data.loggedIn ? (
-                  <Badge tone="good">Jobright: signed in (your browser)</Badge>
+                  <Badge>Jobright: checking sign-in status…</Badge>
+                ) : jobrightStatusQuery.data?.logged_in ? (
+                  <Badge tone="good">Jobright: signed in</Badge>
                 ) : (
-                  <Badge tone="warn">Jobright: not signed in - Run Fetch will open a sign-in tab</Badge>
+                  <Badge tone="warn">Jobright: not signed in - Run Fetch will open a sign-in window</Badge>
                 )}
               </div>
             )}

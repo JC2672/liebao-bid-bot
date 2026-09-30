@@ -61,9 +61,9 @@ async def import_shortlist(profile: str, file: UploadFile) -> dict:
     col = {h: i for i, h in enumerate(headers)}
 
     try:
-        applied_urls = sheets.get_applied_urls(prof.sheet_id, prof.sheet_tab)
+        applied_urls = sheets.get_applied_urls(prof.sheet_webapp_url, prof.sheet_secret, prof.sheet_tab)
     except RuntimeError:
-        applied_urls = set()  # service account not configured yet; don't block import
+        applied_urls = set()  # Sheet Web App not configured yet; don't block import
 
     with get_conn() as conn:
         existing_urls = {
@@ -99,6 +99,15 @@ async def import_shortlist(profile: str, file: UploadFile) -> dict:
 
 @router.post("/{opp_id}/applied")
 def mark_applied(opp_id: int) -> dict:
+    """Sheet append happens FIRST, before anything on disk moves - on
+    purpose. This used to move the files out of staging before appending to
+    the Sheet, which meant a Sheet failure (missing/misconfigured Web App,
+    network hiccup) left the row stuck: files already relocated to the real
+    output folder, but the queue row still `ready` with a `staging_dir` that
+    no longer existed, so retrying it could never actually finish. Doing the
+    Sheet append first means a failure here leaves everything exactly as it
+    was - staging intact, row still `ready` - so it's safe to just fix the
+    Sheet config and click Applied again."""
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
         if row is None:
@@ -109,6 +118,16 @@ def mark_applied(opp_id: int) -> dict:
         raise HTTPException(400, f"Opportunity is '{opp.status}', not ready to apply")
 
     prof = get_profile(opp.profile)
+
+    try:
+        sheets.append_applied_row(
+            prof.sheet_webapp_url, prof.sheet_secret, prof.sheet_tab,
+            date=date.today().isoformat(), company=opp.company, title=opp.title,
+            source=opp.source, url=opp.url,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(500, f"Sheet append failed, nothing was moved: {exc}") from exc
+
     safe = lambda s: "".join(c for c in s if c not in '\\/:*?"<>|').strip()
     dest = Path(prof.output_root) / f"{safe(opp.company)} - {safe(opp.title)} - {date.today():%Y-%m-%d}"
     dest.mkdir(parents=True, exist_ok=True)
@@ -117,15 +136,6 @@ def mark_applied(opp_id: int) -> dict:
         for f in Path(opp.staging_dir).iterdir():
             shutil.move(str(f), dest / f.name)
         shutil.rmtree(opp.staging_dir, ignore_errors=True)
-
-    try:
-        sheets.append_applied_row(
-            prof.sheet_id, prof.sheet_tab,
-            date=date.today().isoformat(), company=opp.company, title=opp.title,
-            source=opp.source, url=opp.url,
-        )
-    except RuntimeError as exc:
-        raise HTTPException(500, f"Filed to disk but Sheet append failed: {exc}") from exc
 
     with get_conn() as conn:
         conn.execute("DELETE FROM opportunities WHERE id = ?", (opp_id,))
@@ -168,7 +178,13 @@ def generate_opportunity(opp_id: int) -> dict:
     """Flips the row to `generating` and hands it to generation.py's
     background worker - returns immediately, the actual ChatGPT/PDF work
     happens off-request. The Queue screen's existing poll picks up the
-    eventual ready/failed transition."""
+    eventual ready/failed transition.
+
+    `open_when_ready=True` here (and only here, not bulk-generate below):
+    the single per-row Generate button pops the staging folder open in
+    Explorer the moment this row lands on `ready`, so there's no need to
+    also click Open Folder - a bulk batch doing the same per row would mean
+    several Explorer windows popping open back to back instead."""
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE opportunities SET status = 'generating', error = NULL, updated_at = datetime('now') "
@@ -177,7 +193,7 @@ def generate_opportunity(opp_id: int) -> dict:
         )
         if cur.rowcount == 0:
             raise HTTPException(400, "Opportunity is not in 'queued' state")
-    generation.enqueue(opp_id)
+    generation.enqueue(opp_id, open_when_ready=True)
     return {"ok": True}
 
 

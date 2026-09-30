@@ -18,7 +18,7 @@ SQLite queue and per-profile Google Sheets:
 │ Sources → Normalize → Dedupe (within run) →     │   │ SQLite queue: queued → generating → ready      │
 │ Hard gates (Salesforce/US-Remote) → Flags       │   │                          ↘ failed → [Retry]    │
 │   ↓                                              │   │                                                 │
-│ Results table (in-memory) → [Export XLSX]        │   │ Engine (ChatGPT web via extension, API fallback)│
+│ Results table (in-memory) → [Export XLSX]        │   │ Engine (ChatGPT web via a dedicated browser)    │
 └──────────────────────────────────────────────────┘   │   ↓                                             │
         you prune the XLSX by hand in Excel            │ Ready row: [Open Post] [Open Folder]            │
         ↓                                               │            [Applied] [Remove]                   │
@@ -86,7 +86,8 @@ about the rest of the system (generation, staging, Output Root) has to change:
   "phone": "",
   "email": "",
   "linkedin": "",
-  "sheet_id": "",                     // Google Sheet ID (optional until Applied is used)
+  "sheet_webapp_url": "",              // Apps Script Web App URL (optional until Applied is used)
+  "sheet_secret": "",                  // shared secret that Web App checks - see docs/apps-script.gs
   "sheet_tab": "Firstname",           // tab name in that Sheet
   "output_root": "F:/Applications/Firstname",
   "template_id": "default"            // live reference into templates/ - see below
@@ -179,6 +180,27 @@ falling back to Company+Title).
    └─ JD.txt
 ```
 
+`POST /queue/{id}/applied` (queue.py's `mark_applied`) does, in this exact
+order: (1) append a row to the profile's Sheet, (2) move the staging
+folder's contents into the destination above and delete the now-empty
+staging folder, (3) delete the opportunity row. The Sheet append happens
+*first* on purpose - it used to happen last, which meant a Sheet failure
+(missing config, network hiccup) left a row stuck: files already moved to
+the real output folder, but the queue row still `ready` with a
+`staging_dir` that no longer existed, so it could never be retried
+cleanly. Appending first means a failure there leaves everything
+untouched - fix the Sheet config, click Applied again.
+
+The Sheet itself is reached through a Google Apps Script Web App bound to
+that spreadsheet (`docs/apps-script.gs`), not a service account - see
+`sheets.py`'s module docstring for the reasoning (no Cloud project, no key
+file to protect; the real tradeoff is a shared secret standing in for
+Google-level auth, since a deployed Web App's URL alone isn't
+authenticated). A profile's `sheet_webapp_url` + `sheet_secret` point at
+that deployment; `sheet_tab` selects which tab within it. The script
+auto-creates a profile's tab (with the header row) on first use, same as
+`gspread`'s `add_worksheet` used to do directly.
+
 ## Fetch: sources & gates
 
 **Sources** (each behind one
@@ -265,57 +287,64 @@ than left half-working; revisit if that gets disentangled.
 **Login-gated sources:** built for Jobright, the first source that actually
 benefits from it (its authenticated API returns far more than the ~20-result
 anonymous cap, and the anonymous page itself is now Cloudflare-challenged -
-see above). This uses the user's **real, already-open Chrome** via a small
-companion extension (`extension/` - plain Manifest V3, no build step, loaded
-unpacked; see its own README) - not a separate automation profile the user
-would have to log into a second time (an earlier version of this did exactly
-that and was the wrong shape for it).
+see above). This mechanism has flip-flopped once already, worth being
+explicit about rather than presenting as if it were always the plan: a
+dedicated Playwright profile the user logs into separately → replaced with a
+companion Chrome extension using the user's real, already-open Chrome (per
+explicit feedback at the time: "it should use whatever Chrome the user
+already has open instead") → knowingly reverted back to a dedicated
+Playwright profile once the ChatGPT generation engine (below) proved that
+exact pattern out and the one real cost - a separate one-time Jobright
+sign-in, even if already signed in elsewhere - was re-weighed and accepted
+in exchange for dropping the extension as a dependency ("all in the app," no
+separate install step). If this flips again, check `git log --
+backend/app/jobright_session.py` for the actual current state rather than
+trusting this paragraph.
 
-How it fits together:
-- `extension/content-script.js` runs only on the web app's own origin
-  (`localhost`/`127.0.0.1:5173`) and relays `window.postMessage` calls from
-  the page to `extension/background.js` (a service worker) and back -
-  content scripts can't call `chrome.cookies`/`chrome.tabs` directly, only
-  the background script can.
-- `background.js` handles two messages: read the user's actual
-  `jobright.ai` cookies (`chrome.cookies.getAll`) and POST them to the local
-  backend, or open a new tab to Jobright's login page
-  (`chrome.tabs.create`).
-- `web/src/lib/extensionBridge.ts` is the frontend half of that handshake:
-  `isExtensionInstalled()` (a "ready" ping the content script sends so the
-  page can tell whether the extension exists at all, rather than hanging
-  forever), `checkJobrightSession()`, `openJobrightLoginTab()`.
-- `POST /sources/jobright/cookies` (backend) receives those cookies from
-  the extension and saves them to `data/browser-sessions/jobright/` -
-  gitignored - returning whether they actually work: a real live request to
-  the authenticated API, not just "were cookies received" (confirmed live:
-  Jobright's API returns a clean, unambiguous signal for an invalid/missing
-  session - HTTP 401, `{"success": false, "errorCode": 41001, "errorMsg":
-  "Cookie not found"}`).
-- `jobright_source.py` loads those saved cookies and attaches them as a
-  plain `Cookie` header on ordinary `requests` calls to the real API - no
-  browser involved in the fetch itself, only in obtaining the cookies.
-  Falls back to the anonymous path automatically when no valid session
-  exists.
+Much narrower in scope than `chatgpt_engine.py`'s browser, since there's no
+conversation to have - just detect whether a sign-in is needed, wait for it
+if so, then read cookies off the browser context:
+- `browser_launch.py` holds the "launch a persistent Chrome context on
+  Windows, reattach via CDP to a window a prior run left open, clear a
+  locked profile and retry" plumbing - extracted out of `chatgpt_engine.py`
+  once this became a second consumer of the exact same logic against a
+  different profile directory and CDP port (`data/jobright-profile/`, port
+  9334 - distinct from ChatGPT's 9333, so the two profiles stay fully
+  independent even if both are mid-flow at once).
+- `jobright_browser.py`'s `open_login_flow()` is fire-and-forget: opens the
+  dedicated profile on its own short-lived thread (same
+  dedicated-thread-with-its-own-`ProactorEventLoop` reasoning as
+  `chatgpt_engine.py` - Playwright's async API needs it to launch a browser
+  subprocess on Windows, and `uvicorn --reload` forces the wrong loop type
+  on the main thread regardless of policy), checks for Jobright's own
+  logged-out "Sign In" button (confirmed live against the real page), waits
+  for it to clear if present, reads `context.cookies()`, hands the
+  `jobright.ai` ones straight to `jobright_session.save_cookies()` - already
+  compatible with zero changes, since it expects exactly the
+  `[{"name", "value", "domain"}, ...]` shape `context.cookies()` returns -
+  then **closes the context**. Unlike ChatGPT's browser (kept open for the
+  app's whole lifetime, reused across many separate generation calls),
+  Jobright's only needs to exist for the duration of one login flow: grab
+  the cookies, close it. The actual fetch afterward is still plain
+  `requests` with the saved cookies - no live browser involved in fetching,
+  only in obtaining the cookies in the first place.
+- `POST /sources/jobright/login` (backend) triggers `open_login_flow()` and
+  returns immediately; the frontend finds out the result by polling the
+  already-existing `GET /sources/jobright/status` (unchanged: a real live
+  request to the authenticated API, not just "were cookies saved" -
+  confirmed live that Jobright's API returns a clean, unambiguous signal for
+  an invalid/missing session - HTTP 401, `{"success": false, "errorCode":
+  41001, "errorMsg": "Cookie not found"}`).
 
-Fetch tab UI/flow, run fresh on every Run Fetch click when Jobright is
-selected (not just checked once and cached): if the extension isn't
-detected at all, warn and continue with anonymous access only; if the
-extension is present but the session check comes back not-logged-in, open
-a Jobright sign-in tab automatically, show a message to sign in and click
-Run Fetch again, and **don't fetch this round** - the second click, now
-signed in, goes through normally.
+Fetch tab UI/flow: the status badge polls while Jobright is selected and not
+yet signed in, so it flips to "signed in" on its own once the user finishes
+signing in in the window that opened - no extra click needed. Clicking **Run
+Fetch** while not signed in opens that window, shows a notice, and **doesn't
+fetch this round** - the next click, now signed in, goes through normally.
 
-Not yet verified with a real Jobright account (I have none) - the
-end-to-end mechanics (cookie relay, live session validation, falling back
-to the anonymous path) are all confirmed working with synthetic cookies,
-but the authenticated `/swan/recommend/search` response shape is assumed to
-match a sibling project's equivalent client, not independently confirmed
-against real logged-in data.
-
-For any other source that turns out to be genuinely account-gated, the same
-extension can grow another cookie-domain + message-type pair rather than
-needing a whole new mechanism.
+The companion extension approach this replaced is described above for
+context; `extension/` itself is left in place unused rather than deleted (it
+had the user's own in-progress edits at the time of this switch).
 
 **Open question, not yet decided:** whether to keep scraping LinkedIn at all.
 A comparable local project (a sibling job-capture tool covering much of this
@@ -515,10 +544,9 @@ regardless of cause).
 |---|---|---|
 | Backend | Python 3.11+ + FastAPI + SQLite (stdlib `sqlite3`) | JobSpy and the ATS scraping ecosystem are Python; FastAPI serves the local UI and exposes an OpenAPI spec for typed frontend clients |
 | Frontend | React + Vite + TypeScript + TanStack Query, Tailwind | clean, structured UI without a heavy design system |
-| Extension | Plain Manifest V3, no build step | relays the user's real browser session for Jobright (cookie-based - see "Login-gated sources"); **not** used for ChatGPT - see "Generation engine" for why that took a different mechanism (a Playwright-driven persistent browser context instead) |
 | PDF | Jinja2 template → HTML → headless Chromium `page.pdf()` (Playwright) | pixel-accurate, template fully controls layout; the same mechanism renders both Template previews (Phase 2, sample data) and real generations (Phase 3, `resume_json`) |
-| ChatGPT | Playwright, async API, persistent browser context (`chatgpt_engine.py`) | drives the real chatgpt.com web UI directly - see "Generation engine" |
-| Sheets | Google service account + `gspread` | no OAuth login flow; you share the Sheet with the service account's email once |
+| ChatGPT / Jobright browsers | Playwright, async API, dedicated persistent browser contexts (`chatgpt_engine.py`, `jobright_browser.py`, sharing launch plumbing via `browser_launch.py`) | drives the real chatgpt.com/jobright.ai web UIs directly, each in its own profile - see "Generation engine" and "Login-gated sources" |
+| Sheets | Google Apps Script Web App, bound to the Sheet itself (`docs/apps-script.gs`) | no Cloud project, no service account, no key file - just Extensions > Apps Script inside the Sheet and one Deploy click; see "On-disk layout on Applied" |
 
 ## Repo layout
 
@@ -531,12 +559,14 @@ liebao-bid-bot/
 │  │  ├─ models.py              # pydantic wire models
 │  │  ├─ sources/                # one module per source adapter
 │  │  ├─ gates.py                # hard filters
-│  │  ├─ sheets.py               # gspread wrapper
+│  │  ├─ sheets.py               # Apps Script Web App client (docs/apps-script.gs)
 │  │  ├─ profiles.py             # profile CRUD (disk, not SQLite)
 │  │  ├─ templates.py            # template CRUD (disk, not SQLite) - independent of profiles
 │  │  ├─ resume_schema.py        # ResumeJson Pydantic schema (the LLM output contract)
 │  │  ├─ resume_render.py        # jinja2 render + playwright PDF print
+│  │  ├─ browser_launch.py       # shared persistent-Chrome-context launch plumbing
 │  │  ├─ chatgpt_engine.py       # persistent Playwright context driving chatgpt.com
+│  │  ├─ jobright_browser.py     # one-shot Playwright login flow for jobright.ai
 │  │  ├─ generation.py           # prompt build, parse/validate, background worker
 │  │  └─ routers/
 │  │     ├─ fetch.py             # POST /fetch, GET /fetch/export
@@ -549,9 +579,9 @@ liebao-bid-bot/
 │  │  └─ <template-id>/ template.json, template.html
 │  └─ pyproject.toml
 ├─ web/                          # React app
-├─ extension/                    # companion extension - Jobright session relay only
+├─ extension/                    # unused - see "Login-gated sources" for why it's kept but unwired
 ├─ data/                         # gitignored: sqlite db, staging/, browser-sessions/,
-│                                 #   chatgpt-profile/ (the persistent Chrome profile)
+│                                 #   chatgpt-profile/, jobright-profile/ (persistent Chrome profiles)
 └─ docs/
    └─ ARCHITECTURE.md
 ```

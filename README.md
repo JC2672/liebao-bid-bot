@@ -43,12 +43,15 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-### Companion Chrome extension (optional, only needed for Jobright's full results)
+### Jobright's full results (optional)
 
-Load `extension/` unpacked (`chrome://extensions` → Developer mode → Load
-unpacked). See `extension/README.md`. Without it, Jobright still works, just
-capped at anonymous-only results (~20, and currently sometimes blocked by a
-Cloudflare challenge Jobright added to its anonymous page).
+Anonymous access is capped at ~20 results and is currently sometimes
+blocked by a Cloudflare challenge Jobright added to its anonymous page.
+For the real, authenticated results, select Jobright on the Fetch screen
+and click **Run Fetch** — it opens a dedicated sign-in window (a separate
+Chrome profile, same idea as the Generate button's ChatGPT window) the
+first time; sign in there once and it's remembered after that. See
+docs/ARCHITECTURE.md's "Login-gated sources" for how.
 
 ### Profiles and Templates
 
@@ -67,12 +70,19 @@ of the box.
 
 ### Google Sheets (optional until you start using Applied)
 
-1. Create a Google Cloud service account, download its JSON key to
-   `backend/service-account.json` (gitignored).
-2. Create a Google Sheet, share it with the service account's email as Editor.
-3. Put the Sheet's ID in the profile's **Google Sheet ID** field, and set
-   **Sheet tab name** to whatever tab you want that profile logged to
-   (created automatically on first Applied if it doesn't exist).
+No Google Cloud project or service account needed - this goes through a
+small Apps Script Web App bound to the Sheet itself:
 
-Without this file present, import still works (dedupe against the Sheet is
-just skipped), but the Applied button will fail until it's set up.
+1. Create a Google Sheet, open **Extensions > Apps Script**, and paste in
+   `docs/apps-script.gs`. Replace `SECRET` inside it with a long random
+   string of your own.
+2. **Deploy > New deployment**, type "Web app", Execute as "Me", who has
+   access "Anyone with the link" > Deploy. Copy the resulting URL.
+3. Put that URL in the profile's **Sheet Web App URL** field, the same
+   `SECRET` value in **Sheet secret**, and set **Sheet tab name** to
+   whatever tab you want that profile logged to (created automatically on
+   first Applied if it doesn't exist).
+
+Without a URL set, import still works (dedupe against the Sheet is just
+skipped), but the Applied button will fail until it's set up - and won't
+move any files when it does, since the Sheet append is checked first.

@@ -26,11 +26,18 @@ function App() {
         <header className="border-b border-border bg-surface">
           <div className="mx-auto flex max-w-7xl items-center gap-8 px-6">
             <div className="flex items-center gap-2 py-3">
-              <img src="/logo.png" alt="" className="logo-light h-8 w-8 object-contain" />
-              <img src="/brand/logo-white.png" alt="" className="logo-dark h-8 w-8 object-contain" />
-              <span className="font-mono text-sm font-medium tracking-tight text-fg">
-                liebao-bid-bot
-              </span>
+              <img src="/logo.png" alt="" className="logo-light h-10 w-10 object-contain" />
+              <img src="/brand/logo-white.png" alt="" className="logo-dark h-10 w-10 object-contain" />
+              <img
+                src="/brand/wordmark-black.png"
+                alt="liebao-bid-bot"
+                className="logo-light h-7 w-auto object-contain"
+              />
+              <img
+                src="/brand/wordmark-white.png"
+                alt="liebao-bid-bot"
+                className="logo-dark h-7 w-auto object-contain"
+              />
             </div>
             <nav className="flex h-full gap-6">
               {TABS.map(([id, label]) => (

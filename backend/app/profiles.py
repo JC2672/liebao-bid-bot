@@ -87,7 +87,7 @@ def create_profile(data: ProfileInput) -> Profile:
     profile = Profile(
         id=profile_id, name=data.name, location=data.location,
         phone=data.phone, email=data.email, linkedin=data.linkedin,
-        sheet_id=data.sheet_id, sheet_tab=data.sheet_tab, output_root=data.output_root,
+        sheet_webapp_url=data.sheet_webapp_url, sheet_secret=data.sheet_secret, sheet_tab=data.sheet_tab, output_root=data.output_root,
         template_id=data.template_id,
     )
     _write(profile, data.prompt)
@@ -100,7 +100,7 @@ def update_profile(profile_id: str, data: ProfileInput) -> Profile:
     updated = Profile(
         id=profile_id, name=data.name, location=data.location,
         phone=data.phone, email=data.email, linkedin=data.linkedin,
-        sheet_id=data.sheet_id, sheet_tab=data.sheet_tab, output_root=data.output_root,
+        sheet_webapp_url=data.sheet_webapp_url, sheet_secret=data.sheet_secret, sheet_tab=data.sheet_tab, output_root=data.output_root,
         template_id=data.template_id,
     )
     _write(updated, data.prompt)

@@ -95,7 +95,8 @@ const EMPTY_FORM: ProfileInput = {
   phone: "",
   email: "",
   linkedin: "",
-  sheet_id: "",
+  sheet_webapp_url: "",
+  sheet_secret: "",
   sheet_tab: "",
   output_root: "",
   template_id: "default",
@@ -162,7 +163,8 @@ export function ProfilesPage() {
     setForm({
       name: detail.name, location: detail.location,
       phone: detail.phone, email: detail.email, linkedin: detail.linkedin,
-      sheet_id: detail.sheet_id, sheet_tab: detail.sheet_tab, output_root: detail.output_root,
+      sheet_webapp_url: detail.sheet_webapp_url, sheet_secret: detail.sheet_secret,
+      sheet_tab: detail.sheet_tab, output_root: detail.output_root,
       template_id: detail.template_id,
       prompt: detail.prompt,
     });
@@ -249,10 +251,16 @@ export function ProfilesPage() {
             <Field label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
             <Field label="LinkedIn" value={form.linkedin} onChange={(v) => setForm({ ...form, linkedin: v })} />
             <Field
-              label="Google Sheet ID"
-              value={form.sheet_id}
-              placeholder="optional until Applied is used"
-              onChange={(v) => setForm({ ...form, sheet_id: v })}
+              label="Sheet Web App URL"
+              value={form.sheet_webapp_url}
+              placeholder="optional until Applied is used - see docs/apps-script.gs"
+              onChange={(v) => setForm({ ...form, sheet_webapp_url: v })}
+            />
+            <Field
+              label="Sheet secret"
+              value={form.sheet_secret}
+              placeholder="the same SECRET set in that Apps Script"
+              onChange={(v) => setForm({ ...form, sheet_secret: v })}
             />
             <Field label="Sheet tab name" value={form.sheet_tab} onChange={(v) => setForm({ ...form, sheet_tab: v })} />
 

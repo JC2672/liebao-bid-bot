@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FolderOpen, RotateCcw, Check, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ExternalLink, FolderOpen, RotateCcw, Check, Sparkles, Trash2, Upload } from "lucide-react";
 import {
   bulkGenerate,
   bulkRemove,
@@ -15,6 +15,65 @@ import {
   retryOpportunity,
 } from "../lib/api";
 import { Button, Card, Checkbox, IconButton, StatusBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
+
+// A custom-styled profile picker matching FetchPage's ExportMenu pattern,
+// in place of a native <select> - the rest of this app doesn't use native
+// form controls for anything this visible.
+function ProfileDropdown({
+  profiles,
+  value,
+  onChange,
+}: {
+  profiles: { id: string; name: string }[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = profiles.find((p) => p.id === value);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-56 items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none transition-colors hover:bg-surface-hover focus:border-accent"
+      >
+        <span className="truncate">{selected?.name ?? "Select profile"}</span>
+        <ChevronDown size={14} className="shrink-0 text-fg-muted" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 z-10 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface shadow-lg">
+          {profiles.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => {
+                onChange(p.id);
+                setOpen(false);
+              }}
+              className={`block w-full px-3 py-2 text-left text-sm hover:bg-surface-hover ${
+                p.id === value ? "bg-accent-wash text-accent" : ""
+              }`}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function QueuePage({ active }: { active: boolean }) {
   const queryClient = useQueryClient();
@@ -37,33 +96,49 @@ export function QueuePage({ active }: { active: boolean }) {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["queue", activeProfile] });
 
+  // Tracked separately from importMutation.data on purpose: React Query
+  // keeps a mutation's `data` around indefinitely until that same mutation
+  // fires again, so reading it directly meant this note kept showing a
+  // stale "+X added, Y already queued" long after other actions (bulk
+  // remove, applied, profile switch) had made it meaningless - confirmed
+  // live as the "status label doesn't sync" report. `clearAndInvalidate`
+  // below explicitly drops it wherever the queue changes some other way.
+  const [importNotice, setImportNotice] = useState<{ inserted: number; skipped: number } | null>(null);
+  const clearAndInvalidate = () => {
+    setImportNotice(null);
+    invalidate();
+  };
+
   const importMutation = useMutation({
     mutationFn: (file: File) => importShortlist(activeProfile, file),
-    onSuccess: invalidate,
+    onSuccess: (data) => {
+      setImportNotice(data);
+      invalidate();
+    },
   });
-  const appliedMutation = useMutation({ mutationFn: markApplied, onSuccess: invalidate });
-  const removeMutation = useMutation({ mutationFn: removeOpportunity, onSuccess: invalidate });
-  const retryMutation = useMutation({ mutationFn: retryOpportunity, onSuccess: invalidate });
-  const generateMutation = useMutation({ mutationFn: generateOpportunity, onSuccess: invalidate });
+  const appliedMutation = useMutation({ mutationFn: markApplied, onSuccess: clearAndInvalidate });
+  const removeMutation = useMutation({ mutationFn: removeOpportunity, onSuccess: clearAndInvalidate });
+  const retryMutation = useMutation({ mutationFn: retryOpportunity, onSuccess: clearAndInvalidate });
+  const generateMutation = useMutation({ mutationFn: generateOpportunity, onSuccess: clearAndInvalidate });
   const bulkRemoveMutation = useMutation({
     mutationFn: bulkRemove,
     onSuccess: () => {
       setSelected(new Set());
-      invalidate();
+      clearAndInvalidate();
     },
   });
   const bulkRetryMutation = useMutation({
     mutationFn: bulkRetry,
     onSuccess: () => {
       setSelected(new Set());
-      invalidate();
+      clearAndInvalidate();
     },
   });
   const bulkGenerateMutation = useMutation({
     mutationFn: bulkGenerate,
     onSuccess: () => {
       setSelected(new Set());
-      invalidate();
+      clearAndInvalidate();
     },
   });
 
@@ -101,45 +176,46 @@ export function QueuePage({ active }: { active: boolean }) {
       <Card className="flex flex-wrap items-center gap-4 p-4">
         <div className="flex flex-col gap-1.5">
           <label className="text-xs text-fg-muted">Profile</label>
-          <select
+          <ProfileDropdown
+            profiles={profilesQuery.data ?? []}
             value={activeProfile}
-            onChange={(e) => {
-              setProfile(e.target.value);
+            onChange={(id) => {
+              setProfile(id);
               setSelected(new Set());
+              setImportNotice(null);
             }}
-            className="w-56 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
-          >
-            {profilesQuery.data?.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          />
         </div>
 
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".xlsx"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) importMutation.mutate(file);
-            e.target.value = "";
-          }}
-        />
-        <Button
-          variant="primary"
-          disabled={!activeProfile || importMutation.isPending}
-          onClick={() => fileInput.current?.click()}
-        >
-          {importMutation.isPending ? "Importing…" : "Import Shortlist (.xlsx)"}
-        </Button>
+        {/* An invisible label spacer, matching the Profile block's real one
+            above, so this button's top edge lines up with the dropdown's
+            rather than sitting centered a bit higher against the row. */}
+        <div className="flex flex-col gap-1.5">
+          <label className="invisible text-xs">Import</label>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".xlsx"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) importMutation.mutate(file);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            variant="primary"
+            disabled={!activeProfile || importMutation.isPending}
+            onClick={() => fileInput.current?.click()}
+          >
+            <Upload size={14} />
+            {importMutation.isPending ? "Importing…" : "Import"}
+          </Button>
+        </div>
 
-        {importMutation.data && (
+        {importNotice && (
           <span className="text-sm text-fg-muted">
-            +{importMutation.data.inserted} added, {importMutation.data.skipped} already
-            applied/queued
+            +{importNotice.inserted} added, {importNotice.skipped} already applied/queued
           </span>
         )}
       </Card>

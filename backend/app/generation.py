@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from pathlib import Path
 
@@ -43,15 +44,26 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 STAGING_DIR = DATA_DIR / "staging"
 
 
-def build_prompt(prompt_md: str, name: str, location: str, phone: str, email: str,
-                  linkedin: str, job_title: str, company: str, job_description: str) -> str:
+def build_prompt_parts(prompt_md: str, name: str, location: str, phone: str, email: str,
+                        linkedin: str, job_title: str, company: str, job_description: str) -> list[str]:
     """Fills in whichever of prompt.md's own placeholder tokens are
     present, with real values - the prompt is the source of truth for the
     schema and tailoring instructions, this just resolves what it's
-    already asking for. `{JD}` is guaranteed to end up in the prompt one
-    way or another: substituted in place if prompt.md uses that token,
-    appended otherwise, so a simpler prompt.md that doesn't follow this
-    convention still gets the job description at all."""
+    already asking for.
+
+    Returns exactly two parts - `[instructions, job_description]` - sent as
+    two separate chat turns rather than pasted together as one message; see
+    `chatgpt_engine.ask()`'s docstring for why. A real profile's prompt.md
+    already anticipates this shape on its own ("I will provide you with: 1.
+    My master resume... 2. A specific job description"), with `{JD}` at the
+    very end of the file - so this is just resolving that split explicitly.
+    If `{JD}` sits before some trailing instructions instead (a different
+    prompt.md's own convention), that trailing part is folded into the
+    second turn, appended after the JD - it still needs to reach the model
+    before generation happens, and there's no third turn to send it in. A
+    prompt.md that doesn't use `{JD}` at all still gets the JD as its own
+    second turn, just without anything to substitute in place of a token
+    that was never there."""
     text = prompt_md
     for token, value in {
         "{NAME}": name, "{LOCATION}": location, "{PHONE}": phone,
@@ -60,29 +72,83 @@ def build_prompt(prompt_md: str, name: str, location: str, phone: str, email: st
     }.items():
         text = text.replace(token, value)
     if "{JD}" in text:
-        text = text.replace("{JD}", job_description)
-    else:
-        text = f"{text}\n\n---\nJob description:\n{job_description}"
-    return text
+        prefix, _, suffix = text.partition("{JD}")
+        if prefix.strip():
+            second = f"{job_description}\n\n{suffix.strip()}" if suffix.strip() else job_description
+            return [prefix.strip(), second]
+    return [text.strip(), f"Job description:\n{job_description}"]
 
 
 _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.S)
 _TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
 
+# ChatGPT's UI renders inline citation markers as custom elements
+# (`:contentReference[...]{...}`-style); confirmed live that reading the
+# page via `.innerText` (see chatgpt_engine._READ_ANSWER) leaks their raw
+# source text straight into whichever string it's positioned in - pure DOM
+# artifact, never real resume content, so it's stripped rather than passed
+# through to the rendered PDF.
+_CITATION_MARKER_RE = re.compile(r":[a-zA-Z][\w-]*reference(?:\[[^\]]*\])?\{[^}]*\}")
+
+
+def _escape_raw_control_chars(text: str) -> str:
+    """Replace any literal control character (raw newline, tab, etc.) found
+    *inside* a JSON string literal with a single space - confirmed live as a
+    real failure mode: the DOM read in chatgpt_engine._READ_ANSWER uses
+    `.innerText` on a rendered <pre><code> block, and a long wrapped line in
+    there can come back with a real newline character where the JSON text
+    itself never had one, which `json.loads` correctly rejects ("Invalid
+    control character"). A space rather than an escaped `\\n` on purpose:
+    none of ResumeJson's fields are meant to contain a real line break, so
+    this is a wrapped-line artifact to undo, not content to preserve - kept
+    as `\\n` it would print as an abrupt break mid-sentence in the PDF. A raw
+    newline *outside* a string (JSON's own pretty-print whitespace) is
+    always harmless and left untouched."""
+    out = []
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                out.append(ch)
+                escaped = False
+            elif ch == "\\":
+                out.append(ch)
+                escaped = True
+            elif ch == '"':
+                in_string = False
+                out.append(ch)
+            elif ord(ch) < 0x20:
+                out.append(" ")  # wrapped-line artifact or other stray control char alike
+            else:
+                out.append(ch)
+        else:
+            if ch == '"':
+                in_string = True
+            out.append(ch)
+    return "".join(out)
+
+
+_MULTISPACE_RE = re.compile(r"[ \t]{2,}")
+
 
 def parse_resume_json(reply: str) -> ResumeJson:
-    """Strip chat filler / code fences, tolerate trailing commas, validate
-    structurally against ResumeJson. Raises ValueError with a readable
-    message on anything that doesn't come out as a real resume - this is
-    real structural validation, not the string-heuristic approach (starts
-    with a tag, minimum length, no refusal phrases) a sibling project uses
-    for its own free-form HTML output."""
+    """Strip chat filler / code fences, tolerate trailing commas and raw
+    control characters inside strings, validate structurally against
+    ResumeJson. Raises ValueError with a readable message on anything that
+    doesn't come out as a real resume - this is real structural validation,
+    not the string-heuristic approach (starts with a tag, minimum length,
+    no refusal phrases) a sibling project uses for its own free-form HTML
+    output."""
     text = reply.strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text).strip()
     match = _JSON_BLOCK_RE.search(text)
     if not match:
         raise ValueError("ChatGPT's reply didn't contain a JSON object")
     candidate = _TRAILING_COMMA_RE.sub(r"\1", match.group(0))
+    candidate = _CITATION_MARKER_RE.sub("", candidate)
+    candidate = _escape_raw_control_chars(candidate)
+    candidate = _MULTISPACE_RE.sub(" ", candidate)
     try:
         data = json.loads(candidate)
     except json.JSONDecodeError as exc:
@@ -97,7 +163,7 @@ def _safe_filename(s: str) -> str:
     return "".join(c for c in s if c not in '\\/:*?"<>|').strip()
 
 
-async def run_generation(opp_id: int) -> None:
+async def run_generation(opp_id: int, open_when_ready: bool = False) -> None:
     """The actual pipeline for one row. Always leaves the row at `ready` or
     `failed` - never raises, so the worker loop can't be taken down by one
     bad opportunity. The row lookup itself is inside the try too (a
@@ -105,7 +171,13 @@ async def run_generation(opp_id: int) -> None:
     other exception this broad `except` doesn't catch - could escape and
     silently kill the whole worker loop; confirmed live as the cause of
     opportunities getting permanently stuck on `generating` with no
-    browser window and no way to recover them from the UI)."""
+    browser window and no way to recover them from the UI).
+
+    `open_when_ready`: pop the staging folder open in Explorer the moment
+    this row lands on `ready` - only set for the single-row Generate button
+    (see routers/queue.py), not bulk-generate, where popping open a new
+    Explorer window per row as each one finishes would be disruptive rather
+    than helpful."""
     try:
         with get_conn() as conn:
             row = conn.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
@@ -114,7 +186,7 @@ async def run_generation(opp_id: int) -> None:
 
         profile = profiles_module.get_profile(row["profile"])
         prompt_md = profiles_module.get_prompt(row["profile"])
-        prompt = build_prompt(
+        prompt_parts = build_prompt_parts(
             prompt_md, profile.name, profile.location, profile.phone, profile.email,
             profile.linkedin, row["title"], row["company"], row["description"],
         )
@@ -134,7 +206,7 @@ async def run_generation(opp_id: int) -> None:
                     (message, opp_id),
                 )
 
-        reply = await chatgpt_engine.ask(prompt, on_status=_on_status)
+        reply = await chatgpt_engine.ask(prompt_parts, on_status=_on_status)
         resume = parse_resume_json(reply)
 
         template_html = templates_module.get_html(profile.template_id)
@@ -161,6 +233,12 @@ async def run_generation(opp_id: int) -> None:
                 "resume_json = ?, staging_dir = ?, updated_at = datetime('now') WHERE id = ?",
                 (resume.model_dump_json(), str(staging_dir), opp_id),
             )
+
+        if open_when_ready:
+            try:
+                os.startfile(str(staging_dir))  # noqa: S606 - Windows-only, matches "My machine only" scope
+            except Exception:  # noqa: BLE001 - a failed auto-open shouldn't undo a successful generation
+                pass
     except Exception as exc:  # noqa: BLE001 - land the row on `failed`, never crash the worker
         with get_conn() as conn:
             conn.execute(
@@ -171,19 +249,19 @@ async def run_generation(opp_id: int) -> None:
 
 # ── Background worker: one generation at a time ──────────────────────────
 
-_queue: asyncio.Queue[int] = asyncio.Queue()
+_queue: asyncio.Queue[tuple[int, bool]] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
 
 
-def enqueue(opp_id: int) -> None:
-    _queue.put_nowait(opp_id)
+def enqueue(opp_id: int, open_when_ready: bool = False) -> None:
+    _queue.put_nowait((opp_id, open_when_ready))
 
 
 async def _worker_loop() -> None:
     while True:
-        opp_id = await _queue.get()
+        opp_id, open_when_ready = await _queue.get()
         try:
-            await run_generation(opp_id)
+            await run_generation(opp_id, open_when_ready)
         except asyncio.CancelledError:
             raise  # real shutdown/cancellation - let it propagate, don't swallow it
         except BaseException as exc:  # noqa: BLE001 - belt-and-suspenders: run_generation
