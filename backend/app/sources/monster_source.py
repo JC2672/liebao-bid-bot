@@ -41,11 +41,12 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
-from ..gates import _is_salesforce_relevant
-from ..models import RawPosting
+from .. import gates
+from ..models import FieldConfig, RawPosting
 
 SEARCH_URL = "https://www.monster.com/jobs/search"
 USER_AGENT = (
@@ -133,7 +134,7 @@ def _location_for(work_arrangement: str) -> str:
     return "Remote"
 
 
-def fetch_monster(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - single fixed query, see module docstring
+def fetch_monster(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - single query_term, not field.title_list, see module docstring; country stays fixed to Remote for now
     stubs: list[dict] = []
     seen_urls: set[str] = set()
     blocked = False
@@ -153,7 +154,7 @@ def fetch_monster(query: str, posted_within_days: int = 7) -> list[RawPosting]: 
 
             for p in range(1, MAX_PAGES + 1):
                 page.goto(
-                    f"{SEARCH_URL}?q=Salesforce&where=Remote&page={p}&so=m.h.sh",
+                    f"{SEARCH_URL}?q={quote(field.query_term)}&where=Remote&page={p}&so=m.h.sh",
                     wait_until="domcontentloaded", timeout=60000,
                 )
                 page.wait_for_timeout(5000)
@@ -173,9 +174,10 @@ def fetch_monster(query: str, posted_within_days: int = 7) -> list[RawPosting]: 
                     if stub["url"] in seen_urls:
                         continue
                     seen_urls.add(stub["url"])
-                    if stub["title"] and not _is_salesforce_relevant(
+                    if stub["title"] and not gates.is_field_relevant(
                         RawPosting(source="monster", external_id="", url="", company="",
-                                    title=stub["title"], location="", description="")
+                                    title=stub["title"], location="", description=""),
+                        field,
                     ):
                         continue
                     stubs.append(stub)

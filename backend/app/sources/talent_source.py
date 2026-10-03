@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from playwright.sync_api import sync_playwright
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 from ._dates import parse_relative_date
 
 SEARCH_URL = "https://www.talent.com/jobs"
@@ -69,7 +69,9 @@ def _card_to_posting(card: dict) -> RawPosting:
     )
 
 
-def fetch_talent(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter found on this endpoint
+def fetch_talent(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter found on this endpoint
+    # `l=United+States` stays fixed for now regardless of `country` - see
+    # dice_source.py's own comment on the same tradeoff.
     postings: list[RawPosting] = []
     seen_urls: set[str] = set()
 
@@ -84,7 +86,7 @@ def fetch_talent(query: str, posted_within_days: int = 7) -> list[RawPosting]:  
             # tracker/font requests that never settle - so wait on the real
             # content selector instead.
             page.goto(
-                f"{SEARCH_URL}?k={query}&l=United+States",
+                f"{SEARCH_URL}?k={field.query_term}&l=United+States",
                 wait_until="domcontentloaded", timeout=30000,
             )
             page.wait_for_selector("article", timeout=20000)

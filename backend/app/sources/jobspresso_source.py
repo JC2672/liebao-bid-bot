@@ -41,10 +41,9 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 from bs4 import BeautifulSoup
 
-from ..gates import _is_salesforce_relevant
-from ..models import RawPosting
+from .. import gates
+from ..models import FieldConfig, RawPosting
 from ._dates import parse_month_day
-from ._salesforce_titles import SALESFORCE_TITLES
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 SEARCH_URL = "https://jobspresso.co/"
@@ -135,11 +134,11 @@ def _fetch_one_title_safe(title: str) -> list[dict]:
         return []
 
 
-def fetch_jobspresso(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - uses SALESFORCE_TITLES instead, see module docstring
+def fetch_jobspresso(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - uses field.title_list instead, see module docstring
     seen: set[str] = set()
     postings: list[RawPosting] = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        for batch in pool.map(_fetch_one_title_safe, SALESFORCE_TITLES):
+        for batch in pool.map(_fetch_one_title_safe, field.title_list):
             for stub in batch:
                 if stub["external_id"] in seen:
                     continue
@@ -158,7 +157,7 @@ def fetch_jobspresso(query: str, posted_within_days: int = 7) -> list[RawPosting
     # Full JD only fetched for title-relevant candidates - most of the
     # fanned-out fetch is noise (see module docstring), no point paying for
     # a detail request that's going to be discarded anyway.
-    relevant = [p for p in postings if _is_salesforce_relevant(p)]
+    relevant = [p for p in postings if gates.is_field_relevant(p, field)]
     with ThreadPoolExecutor(max_workers=DESCRIPTION_WORKERS) as pool:
         descriptions = pool.map(_fetch_description, [p.url for p in relevant])
     for posting, description in zip(relevant, descriptions):

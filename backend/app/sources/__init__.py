@@ -1,13 +1,18 @@
 """Source adapters. Each module exposes
-`fetch(query: str, posted_within_days: int) -> list[RawPosting]`. Most
-sources ignore `posted_within_days` (gates.py's own posted-within-N-days
-gate filters client-side afterward regardless) - it's there for the sources
-whose own API can filter server-side, which matters a lot when a source
-sorts by relevance rather than by date: pulling a fixed-size page of
-"most relevant" results and then discarding old ones client-side can miss
-genuinely recent postings entirely if they don't happen to also rank high
-on relevance. Jobright is a confirmed real case of this - see its module's
-docstring.
+`fetch(field: FieldConfig, country: str, posted_within_days: int) -> list[RawPosting]`.
+`field` carries the active Profile's query term/title list/relevance
+keywords (see fields.py, gates.py) - most sources just read
+`field.query_term` where they used to read a free-text `query` parameter;
+a few (Jobright, Indeed, Built In, Jobspresso) fan out over
+`field.title_list` instead, since a bare query term is a known trap on
+those specifically. Most sources ignore `posted_within_days` (gates.py's
+own posted-within-N-days gate filters client-side afterward regardless) -
+it's there for the sources whose own API can filter server-side, which
+matters a lot when a source sorts by relevance rather than by date:
+pulling a fixed-size page of "most relevant" results and then discarding
+old ones client-side can miss genuinely recent postings entirely if they
+don't happen to also rank high on relevance. Jobright is a confirmed real
+case of this - see its module's docstring.
 
 Add a new source by adding a module here and registering it in SOURCES below.
 """

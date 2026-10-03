@@ -1,21 +1,15 @@
-"""Shared list of real Salesforce-ecosystem job titles, used by any source
-whose own search ranks a bare "Salesforce" query poorly (confirmed so far:
-Jobright and Indeed both do - see their own modules' docstrings for the
-live evidence). Not Jobright-specific despite where it was first built:
-this is a general taxonomy of how Salesforce roles are actually titled in
-the wild, checked against real search results rather than guessed, and
-worth reusing anywhere the same problem shows up.
-"""
-from __future__ import annotations
-
-SALESFORCE_TITLES = [
+{
+  "id": "salesforce",
+  "name": "Salesforce",
+  "query_term": "Salesforce",
+  "title_list": [
     "Salesforce Administrator",
     "Salesforce Developer",
     "Salesforce Consultant",
     "Salesforce Business Analyst",
     "Salesforce Architect",
     "Salesforce Solution Architect",
-    "Salesforce Solutions Architect",  # distinct phrasing, real matches on its own
+    "Salesforce Solutions Architect",
     "Salesforce Technical Architect",
     "Salesforce Engineer",
     "Salesforce Technical Lead",
@@ -40,5 +34,41 @@ SALESFORCE_TITLES = [
     "Revenue Cloud",
     "Financial Services Cloud",
     "OmniStudio",
-    "Agentforce",
-]
+    "Agentforce"
+  ],
+  "relevance_allow": [
+    "salesforce",
+    "apex",
+    "visualforce",
+    "lwc",
+    "lightning web component",
+    "soql",
+    "sosl",
+    "omnistudio",
+    "vlocity",
+    "mulesoft",
+    "cpq",
+    "pardot",
+    "marketing cloud",
+    "service cloud",
+    "sales cloud",
+    "experience cloud",
+    "data cloud",
+    "health cloud",
+    "revenue cloud",
+    "financial services cloud",
+    "agentforce",
+    "salesforce admin",
+    "salesforce developer",
+    "salesforce architect",
+    "salesforce consultant"
+  ],
+  "relevance_deny": [
+    "account executive",
+    "account manager",
+    "sales representative",
+    "sales force effectiveness",
+    "sales force management",
+    "regional sales"
+  ]
+}

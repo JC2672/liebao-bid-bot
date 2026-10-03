@@ -4,7 +4,7 @@ search: each is one call per company's own board (`boards-api.greenhouse.io`,
 `api.lever.co`, `api.ashbyhq.com`), so getting broad coverage means fanning
 out over a list of companies rather than one query.
 
-`query` is intentionally unused - checked live (2026-09-28) whether any of
+The active field's query_term/title_list are intentionally unused - checked live (2026-09-28) whether any of
 the three APIs honor a search-shaped param at all: `search`/`q`/`query`/
 `title` on Greenhouse's boards-api all silently returned the identical
 702-job list for a real board (Stripe), regardless of value. Unlike
@@ -33,14 +33,14 @@ from datetime import datetime
 
 import requests
 
-from ..gates import _is_salesforce_relevant, _is_us_or_us_remote
-from ..models import RawPosting
+from .. import gates
+from ..models import FieldConfig, RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 MAX_WORKERS = 16
 
 
-def _is_relevant(posting: RawPosting) -> bool:
+def _is_relevant(posting: RawPosting, field: FieldConfig, country: str) -> bool:
     # Title and location both reuse gates.py's own checks rather than a
     # second copy of the regexes, so the two can't silently drift apart.
     # A first pass here required an explicit "remote" qualifier in the
@@ -48,10 +48,10 @@ def _is_relevant(posting: RawPosting) -> bool:
     # onsite), but that band was too narrow per live testing - a legitimate
     # match like "Salesforce Engineer III, FedRAMP | MongoDB | United
     # States" got dropped along with the genuinely irrelevant ones. Back to
-    # the same US-or-remote definition every other source uses.
-    if not _is_salesforce_relevant(posting):
+    # the same located-or-remote definition every other source uses.
+    if not gates.is_field_relevant(posting, field):
         return False
-    return _is_us_or_us_remote(posting)
+    return gates.is_located_or_remote_in(posting, country)
 
 # Verified live (2026-09-27): each token below returned a real, non-empty
 # job list at the time of checking. Extend freely, but verify new entries
@@ -72,7 +72,7 @@ ASHBY_BOARDS = [
 ]
 
 
-def _fetch_greenhouse_one(token: str) -> list[RawPosting]:
+def _fetch_greenhouse_one(token: str, field: FieldConfig, country: str) -> list[RawPosting]:
     resp = requests.get(
         f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs",
         params={"content": "true"}, headers=HEADERS, timeout=15,
@@ -96,12 +96,12 @@ def _fetch_greenhouse_one(token: str) -> list[RawPosting]:
             description=job.get("content", ""),
             posted_at=posted_at,
         )
-        if _is_relevant(posting):
+        if _is_relevant(posting, field, country):
             postings.append(posting)
     return postings
 
 
-def _fetch_lever_one(token: str) -> list[RawPosting]:
+def _fetch_lever_one(token: str, field: FieldConfig, country: str) -> list[RawPosting]:
     resp = requests.get(
         f"https://api.lever.co/v0/postings/{token}", params={"mode": "json"},
         headers=HEADERS, timeout=15,
@@ -121,12 +121,12 @@ def _fetch_lever_one(token: str) -> list[RawPosting]:
             location=location, description=job.get("descriptionPlain", ""),
             posted_at=posted_at,
         )
-        if _is_relevant(posting):
+        if _is_relevant(posting, field, country):
             postings.append(posting)
     return postings
 
 
-def _fetch_ashby_one(token: str) -> list[RawPosting]:
+def _fetch_ashby_one(token: str, field: FieldConfig, country: str) -> list[RawPosting]:
     resp = requests.get(
         f"https://api.ashbyhq.com/posting-api/job-board/{token}", headers=HEADERS, timeout=15,
     )
@@ -149,17 +149,17 @@ def _fetch_ashby_one(token: str) -> list[RawPosting]:
             title=job.get("title", ""), location=location,
             description=job.get("descriptionPlain", ""), posted_at=posted_at,
         )
-        if _is_relevant(posting):
+        if _is_relevant(posting, field, country):
             postings.append(posting)
     return postings
 
 
-def _fan_out(tokens: list[str], fetch_one) -> list[RawPosting]:
+def _fan_out(tokens: list[str], fetch_one, field: FieldConfig, country: str) -> list[RawPosting]:
     """One slow/failing company board (timeout, transient 5xx, etc.) must
     not sink the whole batch - the rest still resolve normally."""
     def safe(token: str) -> list[RawPosting]:
         try:
-            return fetch_one(token)
+            return fetch_one(token, field, country)
         except Exception as exc:  # noqa: BLE001
             print(f"[ats_boards] {token} failed: {exc}")
             return []
@@ -171,13 +171,13 @@ def _fan_out(tokens: list[str], fetch_one) -> list[RawPosting]:
     return postings
 
 
-def fetch_greenhouse(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - fan-out, no query or date param
-    return _fan_out(GREENHOUSE_BOARDS, _fetch_greenhouse_one)
+def fetch_greenhouse(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - fan-out, no query or date param
+    return _fan_out(GREENHOUSE_BOARDS, _fetch_greenhouse_one, field, country)
 
 
-def fetch_lever(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001
-    return _fan_out(LEVER_BOARDS, _fetch_lever_one)
+def fetch_lever(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001
+    return _fan_out(LEVER_BOARDS, _fetch_lever_one, field, country)
 
 
-def fetch_ashby(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001
-    return _fan_out(ASHBY_BOARDS, _fetch_ashby_one)
+def fetch_ashby(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001
+    return _fan_out(ASHBY_BOARDS, _fetch_ashby_one, field, country)

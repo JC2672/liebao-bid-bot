@@ -21,8 +21,7 @@ from datetime import datetime
 import pandas as pd
 from jobspy import scrape_jobs
 
-from ..models import RawPosting
-from ._salesforce_titles import SALESFORCE_TITLES
+from ..models import FieldConfig, RawPosting
 
 DEFAULT_LOCATION = "United States"
 DEFAULT_RESULTS = 50
@@ -89,7 +88,7 @@ def _scrape(
     return [_row_to_posting(site_name, row) for _, row in df.iterrows()]
 
 
-def fetch_linkedin(query: str, posted_within_days: int = 7) -> list[RawPosting]:
+def fetch_linkedin(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - location stays fixed, see _scrape's DEFAULT_LOCATION
     # "Remote only" was asked for, but neither achievable lever actually
     # narrows to *US* remote, so this stays on location="United States"
     # rather than trade US onsite/hybrid noise for worldwide noise:
@@ -120,25 +119,27 @@ def fetch_linkedin(query: str, posted_within_days: int = 7) -> list[RawPosting]:
     # Costs one extra request per result (visits each job's own page), so
     # slower and a somewhat higher chance of LinkedIn rate-limiting than the
     # card-only default - accepted tradeoff for working flags.
-    return _scrape("linkedin", query, posted_within_days, linkedin_fetch_description=True)
+    return _scrape("linkedin", field.query_term, posted_within_days, linkedin_fetch_description=True)
 
 
 INDEED_WORKERS = 4  # gentler than Jobright's 8 - Indeed is known to be stricter about scraping
 INDEED_RESULTS_PER_TITLE = 25
 
 
-def fetch_indeed(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - uses SALESFORCE_TITLES instead, see below
-    # A bare "Salesforce" query is a similarly weak search on Indeed as it
-    # was on Jobright (see jobright_source.py's docstring for the fuller
-    # story) - confirmed live: with query="Salesforce", 50 fetched but only
-    # 2 passed gates.py's relevance gate (both from the same company); with
-    # query="Salesforce Developer" alone, 50 fetched and 19 passed, and
-    # "Salesforce Administrator"/"Salesforce Consultant" did comparably well
-    # (30 and 34 of their own fetches). So this runs the same shared title
-    # list Jobright uses (SALESFORCE_TITLES) rather than the caller's free
-    # text, fanned out with modest concurrency (lower than Jobright's, and a
-    # smaller per-title result cap) since Indeed is known to be stricter
-    # about scraping than Jobright turned out to be.
+def fetch_indeed(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - uses field.title_list instead, see below
+    # A bare query is a similarly weak search on Indeed as it was on
+    # Jobright for Salesforce specifically (see jobright_source.py's
+    # docstring for the fuller story) - confirmed live there: with
+    # query="Salesforce", 50 fetched but only 2 passed gates.py's relevance
+    # gate (both from the same company); with query="Salesforce Developer"
+    # alone, 50 fetched and 19 passed. So this fans out over the active
+    # field's own title_list rather than its bare query_term, with modest
+    # concurrency (lower than Jobright's, and a smaller per-title result
+    # cap) since Indeed is known to be stricter about scraping than
+    # Jobright turned out to be. Whether a new field needs this same
+    # fan-out, or whether its own query_term works fine as-is, is exactly
+    # the kind of thing to verify live per field before trusting - not
+    # assumed from Salesforce's own trap shape.
     seen_urls: set[str] = set()
     postings: list[RawPosting] = []
 
@@ -150,7 +151,7 @@ def fetch_indeed(query: str, posted_within_days: int = 7) -> list[RawPosting]:  
             return []
 
     with ThreadPoolExecutor(max_workers=INDEED_WORKERS) as pool:
-        for batch in pool.map(_one, SALESFORCE_TITLES):
+        for batch in pool.map(_one, field.title_list):
             for posting in batch:
                 if posting.url in seen_urls:
                     continue

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from playwright.sync_api import sync_playwright
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 from ._dates import parse_relative_date
 
 SEARCH_URL = "https://jobgether.com/search-offers"
@@ -87,7 +87,7 @@ def _normalize_location(location: str) -> str:
     return f"Remote - {loc}"
 
 
-def fetch_jobgether(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter found on this endpoint
+def fetch_jobgether(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter found on this endpoint
     postings: list[RawPosting] = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -96,7 +96,7 @@ def fetch_jobgether(query: str, posted_within_days: int = 7) -> list[RawPosting]
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
             ))
-            page.goto(f"{SEARCH_URL}?keyword={query}", wait_until="networkidle", timeout=30000)
+            page.goto(f"{SEARCH_URL}?keyword={field.query_term}", wait_until="networkidle", timeout=30000)
             page.wait_for_selector('a[href^="/offer/"]', timeout=15000)
             cards = page.evaluate(_EXTRACT_JS)
         finally:

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 API_URL = "https://remoteok.com/api"
@@ -38,16 +38,16 @@ def _matches_query(job: dict, words: list[str]) -> bool:
     return any(w in text for w in words)
 
 
-def fetch_remoteok(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
+def fetch_remoteok(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
     # RemoteOK's `tags` param is an exact match against its own single-word
     # tag vocabulary (e.g. "salesforce"), not a free-text search - a phrase
     # like "Salesforce Administrator" matches no tag at all and silently
     # returns zero results. Try the first word as a tag (the common case:
     # "Salesforce", "Salesforce Developer", etc. all start with a real tag);
     # if that comes back empty, fall back to the site's general/latest feed
-    # and filter it locally by whether any query word appears in the
+    # and filter it locally by whether any query-term word appears in the
     # title/company/description.
-    words = [w for w in query.strip().lower().split() if w]
+    words = [w for w in field.query_term.strip().lower().split() if w]
     data = _request(words[0]) if words else _request("")
     if len(data) <= 1 and words:  # only the legal-notice object came back
         data = [job for job in _request("") if _matches_query(job, words)]

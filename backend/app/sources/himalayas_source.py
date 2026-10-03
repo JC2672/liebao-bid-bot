@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 API_URL = "https://himalayas.app/jobs/api"
@@ -34,8 +34,8 @@ def _location(job: dict) -> str:
     return f"Remote - {', '.join(names)}" if names else "Remote"
 
 
-def fetch_himalayas(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
-    words = [w for w in query.strip().lower().split() if w]
+def fetch_himalayas(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
+    words = [w for w in field.query_term.strip().lower().split() if w]
     postings: list[RawPosting] = []
     cursor = None
     for _ in range(MAX_PAGES):

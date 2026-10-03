@@ -41,9 +41,8 @@ from urllib.parse import urlencode
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 from ._dates import parse_relative_date
-from ._salesforce_titles import SALESFORCE_TITLES
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 SEARCH_URL = "https://builtin.com/jobs/remote"
@@ -117,12 +116,12 @@ def _fetch_one_title(title: str, posted_within_days: int) -> list[RawPosting]:
     return postings
 
 
-def fetch_builtin(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - uses SALESFORCE_TITLES instead, see module docstring
+def fetch_builtin(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - uses field.title_list instead, see module docstring
     seen: set[str] = set()
     postings: list[RawPosting] = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         for batch in pool.map(
-            lambda t: _fetch_one_title(t, posted_within_days), SALESFORCE_TITLES
+            lambda t: _fetch_one_title(t, posted_within_days), field.title_list
         ):
             for posting in batch:
                 if posting.external_id in seen:

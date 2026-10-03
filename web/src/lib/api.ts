@@ -37,6 +37,8 @@ export interface Profile {
   sheet_tab: string;
   output_root: string;
   template_id: string;
+  field_id: string;
+  country: string;
 }
 
 export interface ProfileDetail extends Profile {
@@ -54,7 +56,29 @@ export interface ProfileInput {
   sheet_tab: string;
   output_root: string;
   template_id: string;
+  field_id: string;
+  country: string;
   prompt: string;
+}
+
+// Tech fields (Salesforce, Data Engineering, ...) - what Profile.field_id
+// points at. Generalizes what used to be hardcoded Salesforce-only query/
+// relevance logic; see backend/app/fields.py and gates.py.
+export interface FieldConfig {
+  id: string;
+  name: string;
+  query_term: string;
+  title_list: string[];
+  relevance_allow: string[];
+  relevance_deny: string[];
+}
+
+export interface FieldInput {
+  name: string;
+  query_term: string;
+  title_list: string[];
+  relevance_allow: string[];
+  relevance_deny: string[];
 }
 
 // Templates are independent of Profiles - a profile just references one by
@@ -136,10 +160,10 @@ export interface FetchStatus {
   error: string | null;
 }
 
-export async function startFetch(sources: string[], query: string, postedWithinDays: number) {
+export async function startFetch(sources: string[], profileId: string, postedWithinDays: number) {
   const { data } = await api.post<{ started: boolean }>("/fetch/start", {
     sources,
-    query,
+    profile: profileId,
     posted_within_days: postedWithinDays,
   });
   return data;
@@ -270,6 +294,30 @@ export async function bulkGenerate(ids: number[]) {
 
 export async function openFolder(id: number) {
   await api.post(`/queue/${id}/open-folder`);
+}
+
+export async function listFields() {
+  const { data } = await api.get<FieldConfig[]>("/fields");
+  return data;
+}
+
+export async function getField(id: string) {
+  const { data } = await api.get<FieldConfig>(`/fields/${id}`);
+  return data;
+}
+
+export async function createField(input: FieldInput) {
+  const { data } = await api.post<FieldConfig>("/fields", input);
+  return data;
+}
+
+export async function updateField(id: string, input: FieldInput) {
+  const { data } = await api.put<FieldConfig>(`/fields/${id}`, input);
+  return data;
+}
+
+export async function deleteField(id: string) {
+  await api.delete(`/fields/${id}`);
 }
 
 export async function checkJobrightStatus(): Promise<{ logged_in: boolean }> {

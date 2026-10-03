@@ -52,8 +52,7 @@ from datetime import datetime
 import requests
 
 from .. import jobright_session
-from ..models import RawPosting
-from ._salesforce_titles import SALESFORCE_TITLES
+from ..models import FieldConfig, RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 SEARCH_URL = "https://jobright.ai/jobs/search"
@@ -61,10 +60,6 @@ API_URL = "https://jobright.ai/swan/recommend/search"
 NEXT_DATA_RE = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
 PAGES_PER_TITLE = 2  # 20/page - keeps ~28 titles x concurrent requests reasonable
 MAX_WORKERS = 8
-
-# SALESFORCE_TITLES (shared - see _salesforce_titles.py) was built and
-# checked against this project's real API, not guessed.
-SEED_TITLES = SALESFORCE_TITLES
 
 
 def _location(job: dict) -> str:
@@ -171,15 +166,19 @@ def _fetch_authenticated_one_title(title: str, cookie_header: str, days_ago: int
     return postings
 
 
-def _fetch_authenticated_seeded(cookie_header: str, days_ago: int) -> list[RawPosting]:
-    """Runs SEED_TITLES concurrently and dedupes by job ID - the same
-    listing (e.g. a generic "Salesforce Developer" role) often turns up
-    under more than one seed title."""
+def _fetch_authenticated_seeded(title_list: list[str], cookie_header: str, days_ago: int) -> list[RawPosting]:
+    """Runs the active field's title_list concurrently and dedupes by job
+    ID - the same listing (e.g. a generic "Salesforce Developer" role)
+    often turns up under more than one seed title. Whether a new field
+    needs this same seeded-title approach (vs. its own query_term working
+    fine as a bare search) is exactly the kind of thing to verify live
+    against the real API per field, not assumed from Salesforce's own
+    company-name-collision trap - see module docstring."""
     seen: set[str] = set()
     postings: list[RawPosting] = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         for batch in pool.map(
-            lambda t: _fetch_authenticated_one_title(t, cookie_header, days_ago), SEED_TITLES
+            lambda t: _fetch_authenticated_one_title(t, cookie_header, days_ago), title_list
         ):
             for posting in batch:
                 if posting.external_id in seen:
@@ -189,7 +188,7 @@ def _fetch_authenticated_seeded(cookie_header: str, days_ago: int) -> list[RawPo
     return postings
 
 
-def fetch_jobright(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - authenticated path uses SEED_TITLES instead, see module docstring
+def fetch_jobright(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - authenticated path uses field.title_list instead, country stays fixed at "US" for now (see _search_body)
     # `daysAgo` is a real server-side recency filter (confirmed live: results
     # scale sensibly with it). Passing it is the fix for a real bug found
     # live: without it, a fixed-size window sorted by relevance/default (not
@@ -198,5 +197,5 @@ def fetch_jobright(query: str, posted_within_days: int = 7) -> list[RawPosting]:
     # was fetched - it can't recover jobs that were never fetched at all.
     cookie_header = jobright_session.get_cookie_header()
     if cookie_header and jobright_session.check_session():
-        return _fetch_authenticated_seeded(cookie_header, posted_within_days)
-    return _fetch_anonymous("Salesforce", posted_within_days)
+        return _fetch_authenticated_seeded(field.title_list, cookie_header, posted_within_days)
+    return _fetch_anonymous(field.query_term, posted_within_days)

@@ -5,6 +5,7 @@ import {
   checkJobrightStatus,
   exportShortlist,
   getFetchStatus,
+  listProfiles,
   startFetch,
   sourceIconUrl,
   SOURCE_OPTIONS,
@@ -13,6 +14,7 @@ import {
   type GateResult,
 } from "../lib/api";
 import { LoadingOverlay, type LoadingOverlayRow } from "../components/LoadingOverlay";
+import { ProfileDropdown } from "../components/ProfileDropdown";
 import { Badge, Button, Card, FlagBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
 // A split "Export" button: the label itself exports the shortlist (the
@@ -98,12 +100,19 @@ function ExportMenu({
 export function FetchPage() {
   const queryClient = useQueryClient();
   const [sources, setSources] = useState<string[]>(["linkedin", "indeed"]);
-  const [query, setQuery] = useState("Salesforce");
+  const [profile, setProfile] = useState<string>("");
   const [postedWithinDays, setPostedWithinDays] = useState(7);
   const [results, setResults] = useState<GateResult[]>([]);
   const [counts, setCounts] = useState<FetchCounts | null>(null);
   const [showRejected, setShowRejected] = useState(false);
   const [jobrightNotice, setJobrightNotice] = useState<string | null>(null);
+
+  const profilesQuery = useQuery({ queryKey: ["profiles"], queryFn: listProfiles });
+  // No field/query input here anymore - the selected profile's own field
+  // (query term/title list/relevance keywords, see backend/app/fields.py)
+  // drives every source now, so Fetch needs to know which profile this
+  // run is for up front, the same way Queue already does.
+  const activeProfile = profile || profilesQuery.data?.[0]?.id || "";
 
   const jobrightSelected = sources.includes("jobright");
   // Live status badge - reads the dedicated Jobright browser profile's
@@ -129,7 +138,7 @@ export function FetchPage() {
   const [fetchJobError, setFetchJobError] = useState<string | null>(null);
 
   const startFetchMutation = useMutation({
-    mutationFn: () => startFetch(sources, query, postedWithinDays),
+    mutationFn: () => startFetch(sources, activeProfile, postedWithinDays),
     onSuccess: () => setIsFetchActive(true),
   });
 
@@ -266,12 +275,12 @@ export function FetchPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-fg-muted">Query</label>
-            <input
-              value={query}
+            <label className="text-xs text-fg-muted">Profile</label>
+            <ProfileDropdown
+              profiles={profilesQuery.data ?? []}
+              value={activeProfile}
               disabled={isFetching}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-52 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+              onChange={setProfile}
             />
           </div>
 
@@ -289,7 +298,7 @@ export function FetchPage() {
 
           <Button
             variant="primary"
-            disabled={sources.length === 0 || isFetching}
+            disabled={sources.length === 0 || !activeProfile || isFetching}
             onClick={handleRunFetch}
           >
             {isFetching ? "Fetching…" : "Run Fetch"}

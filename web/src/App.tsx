@@ -1,20 +1,21 @@
 import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Settings } from "lucide-react";
 import { FetchPage } from "./pages/FetchPage";
 import { QueuePage } from "./pages/QueuePage";
-import { ProfilesPage } from "./pages/ProfilesPage";
-import { TemplatesPage } from "./pages/TemplatesPage";
+import { SetupPage } from "./pages/SetupPage";
 import { ThemeToggle } from "./components/ThemeToggle";
 
 const queryClient = new QueryClient();
 
-type Tab = "fetch" | "queue" | "profiles" | "templates";
+type Tab = "fetch" | "queue" | "setup";
 
+// Setup isn't a daily-use tab the way Fetch/Queue are - it's configuration
+// you visit occasionally, so it sits apart at the header's far end as an
+// icon rather than competing for space in the main text-label nav.
 const TABS: [Tab, string][] = [
   ["fetch", "Fetch"],
   ["queue", "Queue"],
-  ["profiles", "Profiles"],
-  ["templates", "Templates"],
 ];
 
 function App() {
@@ -54,7 +55,19 @@ function App() {
                 </button>
               ))}
             </nav>
-            <div className="ml-auto py-3">
+            <div className="ml-auto flex items-center gap-2 py-3">
+              <button
+                onClick={() => setTab("setup")}
+                aria-label="Setup"
+                title="Setup"
+                className={`rounded-md border p-1.5 transition-colors ${
+                  tab === "setup"
+                    ? "border-accent bg-accent-wash text-accent"
+                    : "border-border text-fg-muted hover:bg-surface-hover hover:text-fg"
+                }`}
+              >
+                <Settings size={16} />
+              </button>
               <ThemeToggle />
             </div>
           </div>
@@ -74,11 +87,8 @@ function App() {
           <div hidden={tab !== "queue"}>
             <QueuePage active={tab === "queue"} />
           </div>
-          <div hidden={tab !== "profiles"}>
-            <ProfilesPage />
-          </div>
-          <div hidden={tab !== "templates"}>
-            <TemplatesPage />
+          <div hidden={tab !== "setup"}>
+            <SetupPage />
           </div>
         </main>
       </div>

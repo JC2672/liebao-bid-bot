@@ -12,7 +12,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 API_URL = "https://jobicy.com/api/v2/remote-jobs"
@@ -27,11 +27,11 @@ def _location(geo: str) -> str:
     return f"Remote - {geo}"
 
 
-def fetch_jobicy(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
-    # Jobicy tags are single words (like RemoteOK) - use the query's first
-    # word as the tag; a phrase like "Salesforce Administrator" would match
-    # nothing as a literal tag.
-    tag = query.strip().lower().split()[0] if query.strip() else ""
+def fetch_jobicy(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
+    # Jobicy tags are single words (like RemoteOK) - use the query term's
+    # first word as the tag; a phrase like "Salesforce Administrator" would
+    # match nothing as a literal tag.
+    tag = field.query_term.strip().lower().split()[0] if field.query_term.strip() else ""
     resp = requests.get(API_URL, params={"tag": tag, "count": 50}, headers=HEADERS, timeout=20)
     resp.raise_for_status()
     data = resp.json()

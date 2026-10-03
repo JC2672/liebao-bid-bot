@@ -14,7 +14,7 @@ from email.utils import parsedate_to_datetime
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 FEED_URL = "https://weworkremotely.com/remote-jobs.rss"
@@ -37,7 +37,7 @@ def _clean_description(html: str) -> str:
     return BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
 
 
-def fetch_weworkremotely(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side search or date filter
+def fetch_weworkremotely(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side search or date filter
     resp = requests.get(FEED_URL, headers=HEADERS, timeout=20)
     resp.raise_for_status()
     root = ET.fromstring(resp.text)

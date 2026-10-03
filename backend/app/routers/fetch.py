@@ -32,8 +32,10 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
+from .. import fields as fields_module
+from .. import profiles as profiles_module
 from ..gates import apply_gates, dedupe_key
-from ..models import FetchRequest, FetchResponse, FetchStatusResponse, GateResult, SourceProgress
+from ..models import FetchRequest, FetchResponse, FetchStatusResponse, FieldConfig, GateResult, SourceProgress
 from ..sources import SOURCES
 
 router = APIRouter(prefix="/fetch", tags=["fetch"])
@@ -57,6 +59,18 @@ _error: str | None = None
 @router.post("/start")
 def start_fetch(req: FetchRequest) -> dict:
     global _running, _progress, _result, _error
+
+    # Resolved here, synchronously, so a missing profile/field 404s
+    # immediately rather than failing deep inside the background thread.
+    try:
+        profile = profiles_module.get_profile(req.profile)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    try:
+        field = fields_module.get_field(profile.field_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
     with _lock:
         if _running:
             raise HTTPException(409, "A fetch is already running")
@@ -66,7 +80,7 @@ def start_fetch(req: FetchRequest) -> dict:
         _error = None
 
     threading.Thread(
-        target=_run_job, args=(req.sources, req.query, req.posted_within_days), daemon=True,
+        target=_run_job, args=(req.sources, field, profile.country, req.posted_within_days), daemon=True,
     ).start()
     return {"started": True}
 
@@ -82,7 +96,7 @@ def fetch_status() -> FetchStatusResponse:
         )
 
 
-def _run_job(source_names: list[str], query: str, posted_within_days: int) -> None:
+def _run_job(source_names: list[str], field: FieldConfig, country: str, posted_within_days: int) -> None:
     global _running, _result, _error
     try:
         postings = []
@@ -92,7 +106,7 @@ def _run_job(source_names: list[str], query: str, posted_within_days: int) -> No
 
             fn = SOURCES.get(name)
             try:
-                found = fn(query, posted_within_days) if fn is not None else []
+                found = fn(field, country, posted_within_days) if fn is not None else []
                 postings.extend(found)
                 with _lock:
                     _progress[i].status = "done"
@@ -111,7 +125,7 @@ def _run_job(source_names: list[str], query: str, posted_within_days: int) -> No
             seen.add(key)
             deduped.append(p)
 
-        results: list[GateResult] = [apply_gates(p, posted_within_days) for p in deduped]
+        results: list[GateResult] = [apply_gates(p, field, country, posted_within_days) for p in deduped]
         counts = {
             "fetched": len(postings),
             "deduped": len(deduped),

@@ -12,14 +12,14 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 API_URL = "https://www.workingnomads.com/api/exposed_jobs/"
 
 
-def fetch_workingnomads(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
-    words = [w for w in query.strip().lower().split() if w]
+def fetch_workingnomads(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
+    words = [w for w in field.query_term.strip().lower().split() if w]
     resp = requests.get(API_URL, headers=HEADERS, timeout=20)
     resp.raise_for_status()
     jobs = resp.json()

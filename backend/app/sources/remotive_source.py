@@ -13,7 +13,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import RawPosting
+from ..models import FieldConfig, RawPosting
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 API_URL = "https://remotive.com/api/remote-jobs"
@@ -31,8 +31,8 @@ def _normalize_location(location: str) -> str:
     return f"Remote - {loc}"
 
 
-def fetch_remotive(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
-    resp = requests.get(API_URL, headers=HEADERS, params={"search": query}, timeout=20)
+def fetch_remotive(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
+    resp = requests.get(API_URL, headers=HEADERS, params={"search": field.query_term}, timeout=20)
     resp.raise_for_status()
     data = resp.json()
 

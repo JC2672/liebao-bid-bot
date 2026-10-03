@@ -5,6 +5,7 @@ import {
   createProfile,
   deleteProfile,
   getProfile,
+  listFields,
   listProfiles,
   listTemplates,
   pickFolder,
@@ -100,6 +101,8 @@ const EMPTY_FORM: ProfileInput = {
   sheet_tab: "",
   output_root: "",
   template_id: "default",
+  field_id: "salesforce",
+  country: "United States",
   prompt: "",
 };
 
@@ -136,6 +139,7 @@ export function ProfilesPage() {
 
   const profilesQuery = useQuery({ queryKey: ["profiles"], queryFn: listProfiles });
   const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: listTemplates });
+  const fieldsQuery = useQuery({ queryKey: ["fields"], queryFn: listFields });
 
   const createMutation = useMutation({
     mutationFn: (input: ProfileInput) => createProfile(input),
@@ -166,6 +170,7 @@ export function ProfilesPage() {
       sheet_webapp_url: detail.sheet_webapp_url, sheet_secret: detail.sheet_secret,
       sheet_tab: detail.sheet_tab, output_root: detail.output_root,
       template_id: detail.template_id,
+      field_id: detail.field_id, country: detail.country,
       prompt: detail.prompt,
     });
     setEditingId(p.id);
@@ -293,6 +298,27 @@ export function ProfilesPage() {
                 ))}
               </select>
             </label>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs text-fg-muted">Field (drives Fetch's query/title list/relevance)</span>
+              <select
+                value={form.field_id}
+                onChange={(e) => setForm({ ...form, field_id: e.target.value })}
+                className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
+              >
+                {fieldsQuery.data?.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <Field
+              label="Country (drives the located-or-remote gate)"
+              value={form.country}
+              onChange={(v) => setForm({ ...form, country: v })}
+            />
           </div>
 
           <label className="mt-3 flex flex-col gap-1.5">

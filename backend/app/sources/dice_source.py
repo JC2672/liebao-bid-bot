@@ -32,8 +32,8 @@ from urllib.parse import quote
 import requests
 from bs4 import BeautifulSoup
 
-from ..gates import _is_salesforce_relevant
-from ..models import RawPosting
+from .. import gates
+from ..models import FieldConfig, RawPosting
 from ._dates import parse_relative_date
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -70,10 +70,15 @@ def _fetch_description(url: str) -> str:
     return _strip_html(data.get("description", ""))
 
 
-def fetch_dice(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
+def fetch_dice(field: FieldConfig, country: str, posted_within_days: int = 7) -> list[RawPosting]:  # noqa: ARG001 - no server-side date filter on this endpoint
+    # `location=United+States` stays fixed here regardless of `country` for
+    # now - gates.is_located_or_remote_in() downstream still correctly
+    # rejects non-matching results for a non-US profile, this would just be
+    # a server-side efficiency improvement for one, left for when a non-US
+    # field actually needs it rather than guessed at here.
     postings: list[RawPosting] = []
     for page in range(1, MAX_PAGES + 1):
-        url = f"https://www.dice.com/jobs?q={quote(query)}&location=United+States&page={page}"
+        url = f"https://www.dice.com/jobs?q={quote(field.query_term)}&location=United+States&page={page}"
         resp = requests.get(url, headers=HEADERS, timeout=20)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -110,7 +115,7 @@ def fetch_dice(query: str, posted_within_days: int = 7) -> list[RawPosting]:  # 
                 posted_at=parse_relative_date(posted_text) if posted_text else None,
             ))
 
-    relevant = [p for p in postings if _is_salesforce_relevant(p)]
+    relevant = [p for p in postings if gates.is_field_relevant(p, field)]
     with ThreadPoolExecutor(max_workers=DESCRIPTION_WORKERS) as pool:
         descriptions = pool.map(_fetch_description, [p.url for p in relevant])
     for posting, description in zip(relevant, descriptions):
