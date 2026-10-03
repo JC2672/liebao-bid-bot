@@ -11,10 +11,18 @@
   with and is now deliberately correcting.
 
   Color: warm-neutral paper background (#F7F6F3, cooler than the flagged
-  cream #F4F1EA), near-black warm ink for text, a deep forest-teal accent
-  (#2B6355) standing in for "in progress / go", ochre for caution and brick
+  cream #F4F1EA), near-black warm ink for text, a forest-teal accent
+  (#337A63) standing in for "in progress / go", ochre for caution and brick
   for rejection - all desaturated enough to sit calmly on white, none of them
-  the generic SaaS blue or Claude's own terracotta.
+  the generic SaaS blue or Claude's own terracotta. (Briefly swapped to a
+  darkened Claude-orange accent and reverted again - it read as too much of
+  that same orange everywhere it was used; back to forest-teal.) The accent
+  was originally a darker #2B6355 in light mode specifically, with this
+  brighter #337A63 reserved for dark mode's own recalibration (see that
+  section below) - unified to this one shade in both modes on direct
+  feedback once seen side by side, after confirming it clears WCAG AA both
+  ways in light mode too (~4.6:1 as button-bg under the light accent-fg
+  text, ~4.8:1 as standalone text/border against the paper background).
 
   Type: the platform sans (Segoe UI on Windows, where this always runs) for
   UI text, a real monospace stack for anything that is literally data -
@@ -38,15 +46,15 @@
   --color-border: #dedad2;
   --color-fg: #211f1c;
   --color-fg-muted: #756f64;
-  --color-accent: #2b6355;
-  --color-accent-hover: #234f44;
+  --color-accent: #337a63;
+  --color-accent-hover: #2b6854;
   /* Always light: every accent-colored surface (button, badge) is dark/
      saturated enough in both themes for light text to read on it - see the
      dark-mode note below for why this is deliberately NOT overridden per
      theme. */
   --color-accent-fg: #f5f3ee;
   --color-accent-wash: #e7efec;
-  --color-good: #2b6355;
+  --color-good: #337a63;
   --color-good-wash: #e7efec;
   --color-warn: #8a5a10;
   --color-warn-wash: #f5ecd9;
@@ -76,12 +84,18 @@
     --color-border: #3a352f;
     --color-fg: #f2efe9;
     --color-fg-muted: #a39c8f;
-    /* Deliberately not as light as the surrounding surfaces: this same
-       value is a button/badge BACKGROUND (needs to stay dark enough for
-       --color-accent-fg's light text to read on it, ~4.6:1) as well as
-       foreground text/icon/border color elsewhere (needs to stand out
-       against --color-bg/--color-surface, ~3-3.4:1) - checked both
-       directions rather than just picking something that "pops". */
+    /* --color-accent/--color-good are now shared with light mode's own
+       values (see :root above) rather than a separate dark-mode-only
+       shade - this value is a button/badge BACKGROUND (needs to stay dark
+       enough for --color-accent-fg's light text to read on it, ~4.6:1) as
+       well as foreground text/icon/border color elsewhere (needs to stand
+       out against --color-bg/--color-surface, ~3-3.4:1) in BOTH modes now,
+       checked both directions rather than just picking something that
+       "pops" - which is exactly why it held up when unified. Hover still
+       diverges on purpose: lighter here (brightening against a dark
+       background reads as "lit up"), darker in light mode (dimming against
+       a light background reads as "pressed") - same convention either way,
+       just opposite arithmetic. */
     --color-accent: #337a63;
     --color-accent-hover: #3f9678;
     --color-accent-wash: #1c2b26;
@@ -172,5 +186,117 @@ button:not(:disabled) {
 @media (prefers-reduced-motion: no-preference) {
   body {
     transition: background-color 0.15s ease, color 0.15s ease;
+  }
+}
+
+/* FetchPage's loading state (components/LoadingOverlay.tsx) is a literal
+   checklist driven by real backend progress, not a decorative loop - see
+   that component's own docstring. Two bits of real motion remain, each
+   tied to one row's actual status rather than looping forever:
+
+   .status-thinking-*: a "running" row's sparkle - a blurred glow breathing
+   behind it (-glow), the sparkle itself twinkling with a drop-shadow bloom
+   and a slow hue-rotate shimmer (-icon), and a second, smaller sparkle
+   glinting at its corner on its own offset beat (-spark). All three loop
+   continuously, since that row's real state (still running) doesn't
+   change until the backend says so.
+
+   .status-check-stroke/.status-check-pop: a "done" row's checkmark draws
+   its stroke in and pops once, then stops (animation-fill-mode: forwards
+   via the shorthand below) - it's reporting a state change that already
+   happened, not representing an ongoing one, so looping it forever would
+   be wrong, not just excessive. */
+.status-thinking-glow {
+  background: radial-gradient(circle, var(--color-accent) 0%, transparent 72%);
+  filter: blur(2.5px);
+  animation: thinking-glow 1.3s ease-in-out infinite;
+}
+
+.status-thinking-icon {
+  animation: thinking-twinkle 1.3s ease-in-out infinite;
+}
+
+.status-thinking-spark {
+  animation: thinking-spark 1.3s ease-in-out infinite;
+}
+
+.status-check-stroke {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: check-draw-stroke 0.35s ease forwards;
+}
+
+.status-check-pop {
+  animation: check-draw-pop 0.35s ease forwards;
+}
+
+@keyframes thinking-glow {
+  0%, 100% {
+    opacity: 0.2;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes thinking-twinkle {
+  0%, 100% {
+    transform: scale(0.85) rotate(-10deg);
+    opacity: 0.65;
+    filter: drop-shadow(0 0 1px var(--color-accent)) hue-rotate(0deg);
+  }
+  50% {
+    transform: scale(1.2) rotate(10deg);
+    opacity: 1;
+    filter: drop-shadow(0 0 4px var(--color-accent)) hue-rotate(25deg);
+  }
+}
+
+@keyframes thinking-spark {
+  0%, 55%, 100% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes check-draw-stroke {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes check-draw-pop {
+  0%, 55% {
+    transform: scale(0.85);
+  }
+  80% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-thinking-glow,
+  .status-thinking-icon,
+  .status-thinking-spark {
+    animation: none;
+  }
+  .status-thinking-spark {
+    opacity: 0;
+  }
+  .status-check-stroke {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .status-check-pop {
+    animation: none;
   }
 }

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ name }} | Resume</title>
 <style>
-  @page { size: Letter; margin: 0; }
+  @page { size: Letter; margin: 0.45in 0.55in; }
 
   :root {
     color-scheme: light;
@@ -18,7 +18,7 @@
 
   * { box-sizing: border-box; }
 
-  html { background: #e9edef; }
+  html { background: #fff; }
 
   body {
     margin: 0;
@@ -160,19 +160,69 @@
   a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: 2px; }
   a:hover { color: var(--accent); }
 
-  @media screen {
-    body {
-      width: 8.5in;
-      max-width: calc(100% - 40px);
-      min-height: 11in;
-      margin: 28px auto;
-      box-shadow: 0 8px 36px rgb(32 43 50 / 10%);
-    }
+
+
+/* PDF-first defaults apply in both screen and print export modes. */
+  @page { size: Letter; margin: 0.45in 0.55in; }
+  html { background: #fff; }
+  body {
+    width: auto;
+    max-width: none;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9.8pt;
+    line-height: 1.22;
+  }
+  .name { font-size: 26pt; padding-top: 8pt; border-top-width: 2pt; }
+  .headline { font-size: 10.5pt; margin-bottom: 5pt; }
+  .contact { font-size: 8.5pt; margin-bottom: 10pt; padding-bottom: 7pt; }
+  h2 {
+    display: block;
+    margin: 10pt 0 5pt;
+    padding-bottom: 3pt;
+    border-bottom: 0.75pt solid var(--rule);
+    font-size: 9pt;
+    letter-spacing: 0.09em;
+    page-break-after: avoid;
+  }
+  h2::after { display: none; }
+  .summary { line-height: 1.22; }
+  .skills-grid {
+    grid-template-columns: minmax(0, 120pt) minmax(0, 1fr);
+    column-gap: 9pt;
+    row-gap: 4pt;
+    padding: 5pt 7pt;
+    font-size: 9pt;
+    line-height: 1.22;
+    border-radius: 0;
+  }
+  .skills-grid > div { break-inside: avoid; }
+  /* Long jobs flow across sheets, while each bullet stays together. */
+  .entry { margin-bottom: 8pt; break-inside: auto; page-break-inside: auto; }
+  .entry-header { break-inside: avoid; page-break-after: avoid; }
+  .entry-title { font-size: 10pt; }
+  .entry-dates { font-size: 8.5pt; }
+  .entry-sub { font-size: 9pt; margin-bottom: 3pt; page-break-after: avoid; }
+  .entry-project { font-size: 9pt; margin-bottom: 3pt; page-break-after: avoid; }
+  ul.bullets li, .cert-list li {
+    margin-bottom: 2.5pt;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .edu-entry { margin-bottom: 3pt; }
+  .cert-list { break-inside: avoid; page-break-inside: avoid; }
+
+
+  .summary, .skills-grid .items, ul.bullets li {
+    text-align: justify;
+    text-align-last: left;
   }
 
   @media screen and (max-width: 600px) {
-    html { background: #fff; }
-    body { width: 100%; max-width: 100%; min-height: 100vh; margin: 0; padding: 26px 22px; box-shadow: none; }
+    body { padding: 24px 20px; }
     .name { font-size: 26pt; }
     .contact { display: block; }
     .contact span { display: block; margin-top: 3pt; }
@@ -182,12 +232,6 @@
     .skills-grid { grid-template-columns: minmax(0, 1fr); row-gap: 2pt; }
     .skills-grid .cat:not(:first-child) { margin-top: 5pt; }
   }
-
-  @media print {
-    html { background: #fff; }
-    body { width: auto; max-width: none; min-height: 0; margin: 0; box-shadow: none; }
-  }
-
 </style>
 </head>
 <body>

@@ -123,12 +123,30 @@ export function sourceIconUrl(domain: string) {
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
 }
 
-export async function runFetch(sources: string[], query: string, postedWithinDays: number) {
-  const { data } = await api.post<{ results: GateResult[]; counts: FetchCounts }>("/fetch", {
+export interface SourceProgress {
+  name: string;
+  status: "pending" | "running" | "done" | "failed";
+  count: number | null;
+}
+
+export interface FetchStatus {
+  running: boolean;
+  sources: SourceProgress[];
+  result: { results: GateResult[]; counts: FetchCounts } | null;
+  error: string | null;
+}
+
+export async function startFetch(sources: string[], query: string, postedWithinDays: number) {
+  const { data } = await api.post<{ started: boolean }>("/fetch/start", {
     sources,
     query,
     posted_within_days: postedWithinDays,
   });
+  return data;
+}
+
+export async function getFetchStatus() {
+  const { data } = await api.get<FetchStatus>("/fetch/status");
   return data;
 }
 

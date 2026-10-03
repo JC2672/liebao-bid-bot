@@ -13,7 +13,6 @@ Add a new source by adding a module here and registering it in SOURCES below.
 """
 from __future__ import annotations
 
-from ..models import RawPosting
 from . import (
     arbeitnow_source,
     ats_boards_source,
@@ -77,15 +76,3 @@ SOURCES: dict[str, callable] = {
 # reuse the saved storage_state for headless fetches) - not built yet since
 # nothing has needed it so far.
 
-
-def fetch_all(source_names: list[str], query: str, posted_within_days: int = 7) -> list[RawPosting]:
-    results: list[RawPosting] = []
-    for name in source_names:
-        fn = SOURCES.get(name)
-        if fn is None:
-            continue
-        try:
-            results.extend(fn(query, posted_within_days))
-        except Exception as exc:  # noqa: BLE001 - one source failing shouldn't kill the fetch
-            print(f"[sources] {name} failed: {exc}")
-    return results

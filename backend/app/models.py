@@ -52,6 +52,29 @@ class FetchResponse(BaseModel):
     counts: dict[str, int]
 
 
+SourceFetchStatus = Literal["pending", "running", "done", "failed"]
+
+
+class SourceProgress(BaseModel):
+    """One source's live state within a running fetch job - see
+    routers/fetch.py's module docstring for why this exists (a real,
+    literal checklist on the Fetch tab, not a decorative animation)."""
+
+    name: str
+    status: SourceFetchStatus = "pending"
+    # Raw postings this source returned, before dedupe/gating - set once
+    # `status` is "done"; stays None for "pending"/"running"/"failed"
+    # (a failed source never produced a real count).
+    count: int | None = None
+
+
+class FetchStatusResponse(BaseModel):
+    running: bool
+    sources: list[SourceProgress]
+    result: FetchResponse | None = None
+    error: str | None = None
+
+
 OpportunityStatus = Literal["queued", "generating", "ready", "failed"]
 
 

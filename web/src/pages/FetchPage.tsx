@@ -4,14 +4,15 @@ import { ChevronDown, Download } from "lucide-react";
 import {
   checkJobrightStatus,
   exportShortlist,
-  runFetch,
+  getFetchStatus,
+  startFetch,
   sourceIconUrl,
   SOURCE_OPTIONS,
   triggerJobrightLogin,
   type FetchCounts,
   type GateResult,
 } from "../lib/api";
-import { LoadingOverlay } from "../components/LoadingOverlay";
+import { LoadingOverlay, type LoadingOverlayRow } from "../components/LoadingOverlay";
 import { Badge, Button, Card, FlagBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
 
 // A split "Export" button: the label itself exports the shortlist (the
@@ -119,13 +120,42 @@ export function FetchPage() {
     refetchInterval: (query) => (jobrightSelected && !query.state.data?.logged_in ? 3000 : false),
   });
 
-  const fetchMutation = useMutation({
-    mutationFn: () => runFetch(sources, query, postedWithinDays),
-    onSuccess: (data) => {
-      setResults(data.results);
-      setCounts(data.counts);
-    },
+  // A fetch is now a background job (see routers/fetch.py): POST /fetch/start
+  // kicks it off and returns immediately, and this polls GET /fetch/status
+  // for real per-source progress (surfaced in LoadingOverlay as a literal
+  // checklist) plus the eventual result - there's no single request to
+  // await here the way the old one-shot POST /fetch worked.
+  const [isFetchActive, setIsFetchActive] = useState(false);
+  const [fetchJobError, setFetchJobError] = useState<string | null>(null);
+
+  const startFetchMutation = useMutation({
+    mutationFn: () => startFetch(sources, query, postedWithinDays),
+    onSuccess: () => setIsFetchActive(true),
   });
+
+  const statusQuery = useQuery({
+    queryKey: ["fetch-status"],
+    queryFn: getFetchStatus,
+    enabled: isFetchActive,
+    refetchInterval: isFetchActive ? 400 : false,
+  });
+
+  const isFetching = startFetchMutation.isPending || isFetchActive;
+
+  useEffect(() => {
+    if (!isFetchActive) return;
+    const status = statusQuery.data;
+    if (status && !status.running) {
+      if (status.result) {
+        setResults(status.result.results);
+        setCounts(status.result.counts);
+      }
+      if (status.error) {
+        setFetchJobError(status.error);
+      }
+      setIsFetchActive(false);
+    }
+  }, [isFetchActive, statusQuery.data]);
 
   const exportMutation = useMutation({
     mutationFn: (rows: GateResult[]) => exportShortlist(rows),
@@ -136,26 +166,33 @@ export function FetchPage() {
     [results, showRejected],
   );
 
-  const selectedDomains = useMemo(
-    () => SOURCE_OPTIONS.filter((s) => sources.includes(s.id)).map((s) => s.domain),
-    [sources],
-  );
+  // What LoadingOverlay actually renders: each currently-selected source,
+  // paired with its live backend status if a poll has come back yet (else
+  // "pending" - nothing's been reported for it, which is also true at that
+  // moment), so there's no flash of an empty checklist right after
+  // clicking Run Fetch and before the first status response lands.
+  const progressRows: LoadingOverlayRow[] = useMemo(() => {
+    const live = new Map(statusQuery.data?.sources.map((s) => [s.name, s]) ?? []);
+    return sources.map((id) => {
+      const opt = SOURCE_OPTIONS.find((s) => s.id === id);
+      const liveSource = live.get(id);
+      return {
+        name: id,
+        domain: opt?.domain ?? "",
+        label: opt?.label ?? id,
+        status: liveSource?.status ?? "pending",
+        count: liveSource?.count ?? null,
+      };
+    });
+  }, [sources, statusQuery.data]);
 
   function toggleSource(id: string) {
     setSources((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   }
 
   async function handleRunFetch() {
-    // Only prompt when there's something to lose - an empty or already-
-    // cleared list runs straight away.
-    if (
-      results.length > 0 &&
-      !confirm(`Discard the current list of ${results.length} fetched jobs and run a new fetch?`)
-    ) {
-      return;
-    }
-
     setJobrightNotice(null);
+    setFetchJobError(null);
     if (jobrightSelected) {
       const status = await checkJobrightStatus();
       queryClient.setQueryData(["jobright-status"], status);
@@ -164,11 +201,20 @@ export function FetchPage() {
         setJobrightNotice(
           "Opened a Jobright sign-in window - sign in there. The badge above will update on its own once you're signed in.",
         );
-        return; // don't fetch this round - wait for the user to actually sign in
+        return; // don't fetch this round - wait for the user to actually sign in; nothing of the old list should be touched yet
       }
     }
 
-    fetchMutation.mutate();
+    // Clear the old list right before the new fetch starts, rather than
+    // leaving it sitting there dimmed under the loading overlay until the
+    // new results arrive and overwrite it - a re-run should read as "that
+    // list is gone, a new one is being built," not "the old one, paused."
+    clearResults();
+    // Also drop any cached /fetch/status from the previous run - otherwise,
+    // if this run selects the same sources, the checklist can briefly flash
+    // the previous run's "done" ticks before the first fresh poll lands.
+    queryClient.removeQueries({ queryKey: ["fetch-status"] });
+    startFetchMutation.mutate();
   }
 
   function clearResults() {
@@ -178,8 +224,6 @@ export function FetchPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      {fetchMutation.isPending && <LoadingOverlay domains={selectedDomains} />}
-
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
           <div className="flex flex-col gap-1.5">
@@ -188,8 +232,9 @@ export function FetchPage() {
               {SOURCE_OPTIONS.map((s) => (
                 <button
                   key={s.id}
+                  disabled={isFetching}
                   onClick={() => toggleSource(s.id)}
-                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm transition-colors ${
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     sources.includes(s.id)
                       ? "border-accent bg-accent-wash text-accent"
                       : "border-border text-fg-muted hover:text-fg"
@@ -224,8 +269,9 @@ export function FetchPage() {
             <label className="text-xs text-fg-muted">Query</label>
             <input
               value={query}
+              disabled={isFetching}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-52 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
+              className="w-52 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
 
@@ -235,17 +281,18 @@ export function FetchPage() {
               type="number"
               min={1}
               value={postedWithinDays}
+              disabled={isFetching}
               onChange={(e) => setPostedWithinDays(Number(e.target.value))}
-              className="w-24 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
+              className="w-24 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
 
           <Button
             variant="primary"
-            disabled={sources.length === 0 || fetchMutation.isPending}
+            disabled={sources.length === 0 || isFetching}
             onClick={handleRunFetch}
           >
-            {fetchMutation.isPending ? "Fetching…" : "Run Fetch"}
+            {isFetching ? "Fetching…" : "Run Fetch"}
           </Button>
 
           {counts && (
@@ -259,78 +306,91 @@ export function FetchPage() {
         </div>
 
         {jobrightNotice && <p className="mt-3 text-sm text-warn">{jobrightNotice}</p>}
-        {fetchMutation.isError && (
-          <p className="mt-3 text-sm text-bad">Fetch failed. Is the backend running on :8000?</p>
+        {startFetchMutation.isError && (
+          <p className="mt-3 text-sm text-bad">Fetch failed to start. Is the backend running on :8000?</p>
         )}
+        {fetchJobError && <p className="mt-3 text-sm text-bad">Fetch failed: {fetchJobError}</p>}
       </Card>
 
-      {results.length > 0 && (
-        <Card className="p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <label className="flex items-center gap-2 text-sm text-fg-muted">
-              <input
-                type="checkbox"
-                checked={showRejected}
-                onChange={(e) => setShowRejected(e.target.checked)}
-              />
-              Show rejected
-            </label>
-            <div className="flex gap-2">
-              <Button variant="ghost" onClick={clearResults}>
-                Clear results
-              </Button>
-              <ExportMenu
-                passedCount={results.filter((r) => r.passed).length}
-                totalCount={results.length}
-                pending={exportMutation.isPending}
-                onExport={(scope) =>
-                  exportMutation.mutate(scope === "shortlist" ? results.filter((r) => r.passed) : results)
-                }
-              />
-            </div>
-          </div>
+      {/* The loading overlay's own area: scoped to just the results list,
+          beneath the configuration panel above (which disables its own
+          controls directly, rather than being covered by this). Needs a
+          standing min-height while pending with nothing fetched yet (first
+          run, or right after Clear results) - otherwise there's no "list"
+          for an absolutely-positioned overlay to size itself against. */}
+      <div className="relative">
+        {isFetching && <LoadingOverlay sources={progressRows} />}
 
-          <Table>
-            <THead>
-              <Tr>
-                <Th>Company</Th>
-                <Th>Title</Th>
-                <Th>Location</Th>
-                <Th>Source</Th>
-                <Th>Flags / Reason</Th>
-                <Th>Posted</Th>
-              </Tr>
-            </THead>
-            <TBody>
-              {visible.map((r) => (
-                <Tr key={`${r.source}-${r.external_id}`} className={!r.passed ? "opacity-50" : ""}>
-                  <Td className="font-medium">{r.company}</Td>
-                  <Td>
-                    <a href={r.url} target="_blank" rel="noreferrer" className="hover:text-accent hover:underline">
-                      {r.title}
-                    </a>
-                  </Td>
-                  <Td className="text-fg-muted">{r.location}</Td>
-                  <Td className="text-fg-muted" mono>
-                    {r.source}
-                  </Td>
-                  <Td>
-                    <div className="flex flex-wrap gap-1">
-                      {!r.passed && <Badge tone="bad">{r.reject_reason}</Badge>}
-                      {r.flags.map((f) => (
-                        <FlagBadge key={f} flag={f} />
-                      ))}
-                    </div>
-                  </Td>
-                  <Td className="text-fg-muted" mono>
-                    {r.posted_at ? new Date(r.posted_at).toLocaleDateString() : "—"}
-                  </Td>
+        {results.length === 0 && isFetching && <div className="h-64" />}
+
+        {results.length > 0 && (
+          <Card className="p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <label className="flex items-center gap-2 text-sm text-fg-muted">
+                <input
+                  type="checkbox"
+                  checked={showRejected}
+                  onChange={(e) => setShowRejected(e.target.checked)}
+                />
+                Show rejected
+              </label>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={clearResults}>
+                  Clear results
+                </Button>
+                <ExportMenu
+                  passedCount={results.filter((r) => r.passed).length}
+                  totalCount={results.length}
+                  pending={exportMutation.isPending}
+                  onExport={(scope) =>
+                    exportMutation.mutate(scope === "shortlist" ? results.filter((r) => r.passed) : results)
+                  }
+                />
+              </div>
+            </div>
+
+            <Table>
+              <THead>
+                <Tr>
+                  <Th>Company</Th>
+                  <Th>Title</Th>
+                  <Th>Location</Th>
+                  <Th>Source</Th>
+                  <Th>Flags / Reason</Th>
+                  <Th>Posted</Th>
                 </Tr>
-              ))}
-            </TBody>
-          </Table>
-        </Card>
-      )}
+              </THead>
+              <TBody>
+                {visible.map((r) => (
+                  <Tr key={`${r.source}-${r.external_id}`} className={!r.passed ? "opacity-50" : ""}>
+                    <Td className="font-medium">{r.company}</Td>
+                    <Td>
+                      <a href={r.url} target="_blank" rel="noreferrer" className="hover:text-accent hover:underline">
+                        {r.title}
+                      </a>
+                    </Td>
+                    <Td className="text-fg-muted">{r.location}</Td>
+                    <Td className="text-fg-muted" mono>
+                      {r.source}
+                    </Td>
+                    <Td>
+                      <div className="flex flex-wrap gap-1">
+                        {!r.passed && <Badge tone="bad">{r.reject_reason}</Badge>}
+                        {r.flags.map((f) => (
+                          <FlagBadge key={f} flag={f} />
+                        ))}
+                      </div>
+                    </Td>
+                    <Td className="text-fg-muted" mono>
+                      {r.posted_at ? new Date(r.posted_at).toLocaleDateString() : "—"}
+                    </Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
