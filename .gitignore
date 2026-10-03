@@ -25,6 +25,9 @@ backend/profiles/*/
 .env
 **/settings.local.json
 
+# Internal design/architecture doc - kept locally, not shared via the repo
+docs/ARCHITECTURE.md
+
 # Editor/OS
 .DS_Store
 Thumbs.db
