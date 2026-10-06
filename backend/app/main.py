@@ -32,6 +32,12 @@ app.include_router(jobright_session.router)
 @app.on_event("startup")
 async def _startup() -> None:
     init_db()
+    # Before the worker starts, not after - a row still `generating` at
+    # this exact moment is always a leftover from a previous process that
+    # died mid-job (forced-closed browser, server stopped mid-run), never
+    # a real in-flight one; see reconcile_interrupted_jobs()'s own
+    # docstring for why that's only true right here, at startup.
+    generation.reconcile_interrupted_jobs()
     generation.start_worker()
 
 

@@ -148,6 +148,23 @@
   --font-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
 }
 
+/* Scales every rem-based Tailwind utility (font sizes, padding, gaps,
+   border-radius) up together by a flat ~12% - the whole app was reading a
+   touch cramped/small, and bumping the root instead of hand-editing every
+   text-sm/px-* across the project keeps it all proportional in one place.
+   A percentage, not a fixed px value, so it still composes with a viewer's
+   own browser zoom/font-size preference instead of overriding it. */
+html {
+  font-size: 112.5%;
+  /* Reserve the vertical scrollbar's width always, not just when a tab's
+     content is tall enough to need it - every tab stays mounted (`hidden`
+     toggles display:none in App.tsx) so switching tabs changes page height,
+     and without this the viewport (and everything centered in it, header
+     included) visibly shifts width by the scrollbar's size depending on
+     which tab happened to be active. */
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--color-bg);
   color: var(--color-fg);
@@ -298,5 +315,76 @@ button:not(:disabled) {
   }
   .status-check-pop {
     animation: none;
+  }
+}
+
+/* General-purpose entrance animations - this app was otherwise entirely
+   static chrome (instant show/hide, no motion anywhere outside the Fetch
+   loading overlay above). Applied to things that already mount/unmount
+   conditionally (dropdown panels, error banners, newly-arrived result rows)
+   rather than anything needing new state just to animate. */
+/* Ends at --fade-in-target-opacity (default 1), not a hardcoded 1 - a
+   dimmed row (opacity-50, for a rejected/excluded item) would otherwise
+   wake up to full opacity the instant its entrance animation finishes,
+   since animation-fill-mode:both makes the keyframe's own end value win
+   over the static opacity-50 utility once the animation completes.
+   Confirmed live: rejected rows briefly dimmed, then undimmed themselves
+   right after fading in. Rows that want to end up dimmed set the variable
+   inline alongside their animationDelay. */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: var(--fade-in-target-opacity, 1);
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.2s ease-out both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.12s ease-out both;
+  transform-origin: top;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-scale-in {
+    animation: none;
+  }
+}
+
+/* GenerationStatusWidget's glass panel - plain blur first as the safe
+   value every browser accepts, then the real refraction (an SVG
+   displacement filter bending what's behind it, not just blurring it -
+   see the <filter id="liebao-glass-distortion"> the component renders)
+   layered on top inside an @supports block. A browser that can't parse
+   `url(#id)` inside backdrop-filter (Firefox, at the time of writing)
+   just never reaches the second declaration and keeps the first - CSS
+   drops a single invalid declaration, not the whole rule, so this always
+   degrades to a plain blurred glass rather than losing the effect
+   outright. */
+.glass-refract {
+  backdrop-filter: blur(120px) saturate(1.5);
+  -webkit-backdrop-filter: blur(120px) saturate(1.5);
+}
+@supports (backdrop-filter: url("#liebao-glass-distortion")) {
+  .glass-refract {
+    backdrop-filter: url("#liebao-glass-distortion") blur(90px) saturate(1.5);
   }
 }

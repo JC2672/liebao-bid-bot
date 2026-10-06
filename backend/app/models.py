@@ -48,7 +48,7 @@ class FetchRequest(BaseModel):
     # routers/fetch.py's module docstring for why the old free-text query
     # box was removed.
     profile: str
-    posted_within_days: int = 7
+    posted_within_days: int = 1
 
 
 class FetchResponse(BaseModel):
@@ -103,9 +103,27 @@ class BulkIds(BaseModel):
     ids: list[int]
 
 
-class ImportRequest(BaseModel):
+class QueueImportRow(BaseModel):
+    """The subset of a GateResult actually needed to insert a queue row -
+    not the full GateResult (passed/reject_reason/flags/posted_at are the
+    gate's own bookkeeping, irrelevant once something's in the queue)."""
+
+    company: str
+    title: str
+    location: str
+    source: str
+    url: str
+    description: str = ""
+
+
+class ImportDirectRequest(BaseModel):
+    """Body for POST /queue/import-direct - the same dedupe /queue/import
+    does (against the profile's Sheet + current queue), but given a Fetch
+    run's shortlist rows directly instead of requiring an export-to-XLSX-
+    then-upload roundtrip. Powers Fetch's "Queue after fetch" checkbox."""
+
     profile: str
-    # Rows come from the uploaded XLSX/CSV; parsed server-side into RawPosting-shaped dicts.
+    rows: list[QueueImportRow]
 
 
 class Profile(BaseModel):

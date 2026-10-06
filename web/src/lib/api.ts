@@ -252,6 +252,29 @@ export async function listQueue(profile: string) {
   return data;
 }
 
+// Same dedupe /queue/import does (Sheet applied + current queue), but
+// skips the export-to-XLSX-then-upload roundtrip - takes a Fetch run's
+// shortlist rows directly. Powers Fetch's "Auto-queue & generate" checkbox.
+// Returns the newly-inserted rows' ids, not just a count, so the caller
+// can bulk-generate exactly those rows next.
+export async function importFetchResults(profile: string, rows: GateResult[]) {
+  const { data } = await api.post<{ inserted: number; skipped: number; ids: number[] }>(
+    "/queue/import-direct",
+    {
+      profile,
+      rows: rows.map((r) => ({
+        company: r.company,
+        title: r.title,
+        location: r.location,
+        source: r.source,
+        url: r.url,
+        description: r.description,
+      })),
+    },
+  );
+  return data;
+}
+
 export async function importShortlist(profile: string, file: File) {
   const form = new FormData();
   form.append("file", file);
@@ -260,6 +283,34 @@ export async function importShortlist(profile: string, file: File) {
     form,
     { params: { profile }, headers: { "Content-Type": "multipart/form-data" } },
   );
+  return data;
+}
+
+// Remaining/ETA for whatever's currently generating - see generation.py's
+// get_progress() for how it's tracked (in-memory, not persisted - the
+// opportunities table's updated_at gets overwritten on every status
+// change, so there's nothing in the DB to compute a job's actual duration
+// from). `profile` omitted: resolves to whichever profile the current run
+// actually belongs to - the floating status widget isn't scoped to any
+// one tab, so it has no profile of its own to ask about.
+export interface QueueProgress {
+  active: boolean;
+  profile: string | null;
+  completed: number;
+  total: number;
+  remaining: number;
+  ready: number;
+  failed: number;
+  cancelled: number;
+  avg_seconds_per_job: number | null;
+  eta_seconds: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  total_elapsed_seconds: number | null;
+}
+
+export async function getQueueProgress(profile?: string) {
+  const { data } = await api.get<QueueProgress>("/queue/progress", { params: profile ? { profile } : {} });
   return data;
 }
 

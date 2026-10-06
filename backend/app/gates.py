@@ -11,13 +11,15 @@ Generalized to `is_field_relevant`/`is_located_or_remote_in`, driven by a
 Profile's own FieldConfig/country rather than fixed constants - see
 fields.py. The US rule's own logic (state abbreviations, the "bare Remote
 with no country = ambiguous but accepted" call) is kept completely
-unchanged and still used verbatim for country="United States" - this was
-a deliberate, carefully-tuned rule and nothing about generalizing it should
-regress it. Any OTHER country gets a much simpler country-name-or-remote-
-scoped-to-it fallback for now; giving a new country the US rule's own level
-of care (abbreviation lists, real edge cases) is exactly the kind of
-per-country work to do later once a real field/profile needs it, not to
-guess at here.
+unchanged and still used verbatim whenever a profile's country includes a
+recognized US alias - this was a deliberate, carefully-tuned rule and
+nothing about generalizing it should regress it. Any OTHER country gets a
+simpler alias-list-or-remote-scoped-to-it fallback: a profile's `country`
+can be a comma-separated list ("United States, US, USA") so the same
+posting can be matched under however a given source happens to spell it,
+instead of needing the US's hand-tuned regex to get that coverage. Giving
+a new country the US rule's own level of care (abbreviation lists, real
+edge cases) is still per-country work to do later if one needs it.
 """
 from __future__ import annotations
 
@@ -102,30 +104,51 @@ def _is_us_or_us_remote(posting: RawPosting) -> bool:
     return False
 
 
-def _country_name_re(country: str) -> re.Pattern:
-    return re.compile(re.escape(country.strip()), re.IGNORECASE)
+def _split_aliases(country: str) -> list[str]:
+    """A profile's country can be a comma-separated list of aliases ("United
+    States, US, USA") instead of one name - sources spell the same country
+    inconsistently and the old single-string match missed most of them for
+    everything except the US (which got its own hardcoded alias set below).
+    This lets any country get that same alias coverage without code changes."""
+    seen: list[str] = []
+    for part in country.split(","):
+        alias = part.strip()
+        if alias and alias.lower() not in {s.lower() for s in seen}:
+            seen.append(alias)
+    return seen
 
 
-def _remote_elsewhere_re(country: str) -> re.Pattern:
-    return re.compile(
-        r"remote\s*[-–—(]\s*(?!" + re.escape(country.strip()) + r")[a-z]", re.IGNORECASE
-    )
+def _aliases_re(aliases: list[str]) -> re.Pattern:
+    if not aliases:
+        return _NEVER_MATCHES
+    return re.compile("|".join(re.escape(a) for a in aliases), re.IGNORECASE)
+
+
+def _remote_elsewhere_re(aliases: list[str]) -> re.Pattern:
+    if not aliases:
+        return re.compile(r"remote\s*[-–—(]\s*[a-z]", re.IGNORECASE)
+    exclude = "|".join(re.escape(a) for a in aliases)
+    return re.compile(r"remote\s*[-–—(]\s*(?!(?:" + exclude + r"))[a-z]", re.IGNORECASE)
 
 
 def _location_scope_re(country: str) -> re.Pattern:
     """Whatever "explicitly scoped to this country" means for the _flags
     remote-unscoped check below - the real US regex for the US, the simple
-    name-match fallback for anything else."""
-    return US_LOCATION_RE if country.strip().lower() in US_NAMES else _country_name_re(country)
+    alias-match fallback for anything else."""
+    aliases = _split_aliases(country)
+    if any(a.lower() in US_NAMES for a in aliases):
+        return US_LOCATION_RE
+    return _aliases_re(aliases)
 
 
 def is_located_or_remote_in(posting: RawPosting, country: str) -> bool:
-    if country.strip().lower() in US_NAMES:
+    aliases = _split_aliases(country)
+    if any(a.lower() in US_NAMES for a in aliases):
         return _is_us_or_us_remote(posting)
 
     loc = posting.location or ""
-    country_re = _country_name_re(country)
-    remote_elsewhere_re = _remote_elsewhere_re(country)
+    country_re = _aliases_re(aliases)
+    remote_elsewhere_re = _remote_elsewhere_re(aliases)
     if remote_elsewhere_re.search(loc):
         return False
     if country_re.search(loc):

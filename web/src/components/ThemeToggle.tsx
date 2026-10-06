@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Moon, Sun } from "lucide-react";
 
 type ThemeChoice = "light" | "dark";
 
@@ -15,7 +16,11 @@ function readStoredTheme(): ThemeChoice | null {
  * pre-paint script in index.html and the CSS in index.css). Starts from
  * whatever's currently in effect - the saved override if there is one,
  * otherwise the OS setting - so the very first click always visibly
- * flips something rather than possibly matching what's already shown. */
+ * flips something rather than possibly matching what's already shown.
+ *
+ * A sliding switch rather than a plain icon button - the track itself
+ * carries the on/off state at a glance (which an icon swap alone doesn't),
+ * and the thumb's icon still shows which mode is current. */
 export function ThemeToggle() {
   const [theme, setTheme] = useState<ThemeChoice>(
     () => readStoredTheme() ?? (systemPrefersDark() ? "dark" : "light"),
@@ -26,22 +31,27 @@ export function ThemeToggle() {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
+  const isDark = theme === "dark";
+
   return (
     <button
-      onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-      className="rounded-md border border-border p-1.5 text-fg-muted transition-colors hover:text-fg hover:bg-surface-hover"
+      type="button"
+      role="switch"
+      aria-checked={isDark}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors ${
+        isDark ? "border-accent bg-accent" : "border-border bg-surface-hover"
+      }`}
     >
-      {theme === "dark" ? (
-        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-          <path d="M10 3a1 1 0 011 1v1a1 1 0 11-2 0V4a1 1 0 011-1zm0 12a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zm7-5a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zm10.657-5.657a1 1 0 010 1.414l-.707.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM6.464 14.243a1 1 0 010 1.414l-.707.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zm9.193 1.414a1 1 0 01-1.414 0l-.707-.707a1 1 0 111.414-1.414l.707.707a1 1 0 010 1.414zM6.464 5.757a1 1 0 01-1.414 0l-.707-.707a1 1 0 011.414-1.414l.707.707a1 1 0 010 1.414zM10 6a4 4 0 100 8 4 4 0 000-8z" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-          <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-        </svg>
-      )}
+      <span
+        className={`inline-flex h-5 w-5 items-center justify-center rounded-full bg-surface shadow transition-transform ${
+          isDark ? "translate-x-[22px]" : "translate-x-0.5"
+        }`}
+      >
+        {isDark ? <Moon size={11} className="text-accent" /> : <Sun size={11} className="text-warn" />}
+      </span>
     </button>
   );
 }

@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Download } from "lucide-react";
+import { CheckCircle2, ChevronDown, Download, X, XCircle } from "lucide-react";
 import {
+  bulkGenerate,
   checkJobrightStatus,
   exportShortlist,
   getFetchStatus,
+  importFetchResults,
   listProfiles,
   startFetch,
   sourceIconUrl,
@@ -15,7 +17,31 @@ import {
 } from "../lib/api";
 import { LoadingOverlay, type LoadingOverlayRow } from "../components/LoadingOverlay";
 import { ProfileDropdown } from "../components/ProfileDropdown";
-import { Badge, Button, Card, FlagBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
+import { SearchBox } from "../components/SearchBox";
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  FlagBadge,
+  TBody,
+  THead,
+  Table,
+  Td,
+  Th,
+  Tr,
+  prettifyReason,
+} from "../components/ui";
+import { matchesSearch } from "../lib/search";
+
+// Includes the row's index, not just source+external_id - confirmed live
+// that some sources (Dice) return the same external_id twice with
+// different company/location text, which survives the backend's dedupe as
+// two distinct GateResults. Without the index, selecting/overriding one
+// would silently apply to its duplicate too.
+function rowKey(r: GateResult, i: number) {
+  return `${r.source}-${r.external_id}-${i}`;
+}
 
 // A split "Export" button: the label itself exports the shortlist (the
 // common case), the chevron opens a menu for the less-common "everything,
@@ -63,12 +89,12 @@ function ExportMenu({
           aria-label="Export options"
           className="inline-flex items-center rounded-r-md border-y border-r border-accent-hover bg-accent px-1.5 text-accent-fg transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <ChevronDown size={14} />
+          <ChevronDown size={14} className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
         </button>
       </div>
 
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface shadow-lg">
+        <div className="animate-scale-in absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface shadow-lg">
           <button
             disabled={passedCount === 0}
             onClick={() => {
@@ -97,14 +123,22 @@ function ExportMenu({
   );
 }
 
-export function FetchPage() {
+export function FetchPage({ onQueued }: { onQueued?: (profileId: string) => void }) {
   const queryClient = useQueryClient();
   const [sources, setSources] = useState<string[]>(["linkedin", "indeed"]);
   const [profile, setProfile] = useState<string>("");
-  const [postedWithinDays, setPostedWithinDays] = useState(7);
+  const [postedWithinDays, setPostedWithinDays] = useState(1);
+  // Skips the usual export -> hand-prune in Excel -> import-to-Queue
+  // roundtrip: the shortlist (passed rows only, same set Export's
+  // "Shortlist Only" uses) goes straight into Queue for the active
+  // profile, and generation starts on all of it immediately - no manual
+  // check step at all, by design (see queueShortlist below).
+  const [queueAfterFetch, setQueueAfterFetch] = useState(false);
+  const [queueAfterFetchError, setQueueAfterFetchError] = useState<string | null>(null);
   const [results, setResults] = useState<GateResult[]>([]);
   const [counts, setCounts] = useState<FetchCounts | null>(null);
   const [showRejected, setShowRejected] = useState(false);
+  const [search, setSearch] = useState("");
   const [jobrightNotice, setJobrightNotice] = useState<string | null>(null);
 
   const profilesQuery = useQuery({ queryKey: ["profiles"], queryFn: listProfiles });
@@ -158,6 +192,9 @@ export function FetchPage() {
       if (status.result) {
         setResults(status.result.results);
         setCounts(status.result.counts);
+        if (queueAfterFetchRef.current) {
+          void queueShortlist(status.result.results);
+        }
       }
       if (status.error) {
         setFetchJobError(status.error);
@@ -166,14 +203,106 @@ export function FetchPage() {
     }
   }, [isFetchActive, statusQuery.data]);
 
+  // Read via a ref, not the `queueAfterFetch` state directly - the
+  // checkbox is disabled while fetching (same as every other control
+  // here), so it can't actually change mid-run, but the ref avoids this
+  // effect needing `queueAfterFetch`/`activeProfile` in its own dependency
+  // array just to read their current value once, at completion.
+  const queueAfterFetchRef = useRef(queueAfterFetch);
+  queueAfterFetchRef.current = queueAfterFetch;
+
+  async function queueShortlist(resultRows: GateResult[]) {
+    setQueueAfterFetchError(null);
+    const shortlist = resultRows.filter((r) => r.passed);
+    if (shortlist.length === 0) {
+      onQueued?.(activeProfile);
+      return;
+    }
+    try {
+      const { ids } = await importFetchResults(activeProfile, shortlist);
+      if (ids.length > 0) {
+        await bulkGenerate(ids);
+      }
+      queryClient.invalidateQueries({ queryKey: ["queue", activeProfile] });
+      onQueued?.(activeProfile);
+    } catch {
+      setQueueAfterFetchError("Queueing failed - the results are still shown below, review and export manually.");
+    }
+  }
+
   const exportMutation = useMutation({
     mutationFn: (rows: GateResult[]) => exportShortlist(rows),
   });
 
-  const visible = useMemo(
-    () => results.filter((r) => showRejected || r.passed),
-    [results, showRejected],
+  // Auto dedupe+gating gets the list most of the way there, but still
+  // leaves near-duplicates and borderline calls that need a human glance.
+  // Rather than hiding that judgment call, this records it: an
+  // "include"/"exclude" override per row, kept alongside (not instead of)
+  // the original gate's passed/reject_reason/flags, so the auto reasoning
+  // stays visible next to the manual correction. Session-only - reset on
+  // every new fetch/Clear results, since it's a one-time curation pass
+  // over THIS run's results, not a decision about postings in general.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [overrides, setOverrides] = useState<Map<string, "include" | "exclude">>(new Map());
+
+  // Keyed by index in the full, unfiltered `results` array - not by
+  // position within the filtered/visible list, which shifts every time
+  // "Show rejected" or the search box changes what's shown. Keying off a
+  // position that moves would silently detach a row's selection/override
+  // from it the next time the visible set changed.
+  const keyedResults = useMemo(
+    () => results.map((r, i) => ({ r, key: rowKey(r, i) })),
+    [results],
   );
+
+  // The gate's own call, unless a manual override says otherwise - this
+  // drives the shortlist (Export, counts) AND, per the user's call, the
+  // row's visual state too: an included row looks like a normal pass, an
+  // excluded one looks/behaves like a rejected one, rather than keeping a
+  // "this was overridden" look baked into the dimming itself.
+  function effectivePassed(r: GateResult, key: string) {
+    const override = overrides.get(key);
+    if (override) return override === "include";
+    return r.passed;
+  }
+
+  const visible = useMemo(
+    () =>
+      keyedResults.filter(
+        ({ r, key }) =>
+          (showRejected || effectivePassed(r, key)) && matchesSearch(search, [r.company, r.title]),
+      ),
+    [keyedResults, showRejected, search, overrides],
+  );
+
+  const allSelected = visible.length > 0 && visible.every(({ key }) => selected.has(key));
+  const someSelected = selected.size > 0 && !allSelected;
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(visible.map(({ key }) => key)));
+  }
+  function toggleOne(key: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+  function applyOverride(decision: "include" | "exclude") {
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      for (const key of selected) next.set(key, decision);
+      return next;
+    });
+    setSelected(new Set());
+  }
+  function clearOverride(key: string) {
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+  }
 
   // What LoadingOverlay actually renders: each currently-selected source,
   // paired with its live backend status if a poll has come back yet (else
@@ -202,6 +331,7 @@ export function FetchPage() {
   async function handleRunFetch() {
     setJobrightNotice(null);
     setFetchJobError(null);
+    setQueueAfterFetchError(null);
     if (jobrightSelected) {
       const status = await checkJobrightStatus();
       queryClient.setQueryData(["jobright-status"], status);
@@ -229,6 +359,8 @@ export function FetchPage() {
   function clearResults() {
     setResults([]);
     setCounts(null);
+    setSelected(new Set());
+    setOverrides(new Map());
   }
 
   return (
@@ -296,6 +428,22 @@ export function FetchPage() {
             />
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <label className="invisible text-xs">Auto-queue & generate</label>
+            <label
+              className="flex items-center gap-2 py-1.5 text-sm text-fg-muted"
+              title="Skips the usual export/review/import roundtrip - the shortlist goes straight into Queue for this profile and resume generation starts on all of it immediately, with no manual check step."
+            >
+              <input
+                type="checkbox"
+                checked={queueAfterFetch}
+                disabled={isFetching}
+                onChange={(e) => setQueueAfterFetch(e.target.checked)}
+              />
+              Auto-queue & generate
+            </label>
+          </div>
+
           <Button
             variant="primary"
             disabled={sources.length === 0 || !activeProfile || isFetching}
@@ -314,11 +462,14 @@ export function FetchPage() {
           )}
         </div>
 
-        {jobrightNotice && <p className="mt-3 text-sm text-warn">{jobrightNotice}</p>}
+        {jobrightNotice && <p className="animate-fade-in-up mt-3 text-sm text-warn">{jobrightNotice}</p>}
         {startFetchMutation.isError && (
-          <p className="mt-3 text-sm text-bad">Fetch failed to start. Is the backend running on :8000?</p>
+          <p className="animate-fade-in-up mt-3 text-sm text-bad">Fetch failed to start. Is the backend running on :8000?</p>
         )}
-        {fetchJobError && <p className="mt-3 text-sm text-bad">Fetch failed: {fetchJobError}</p>}
+        {fetchJobError && <p className="animate-fade-in-up mt-3 text-sm text-bad">Fetch failed: {fetchJobError}</p>}
+        {queueAfterFetchError && (
+          <p className="animate-fade-in-up mt-3 text-sm text-bad">{queueAfterFetchError}</p>
+        )}
       </Card>
 
       {/* The loading overlay's own area: scoped to just the results list,
@@ -335,24 +486,46 @@ export function FetchPage() {
         {results.length > 0 && (
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-sm text-fg-muted">
-                <input
-                  type="checkbox"
-                  checked={showRejected}
-                  onChange={(e) => setShowRejected(e.target.checked)}
-                />
-                Show rejected
-              </label>
+              <div className="flex items-center gap-4">
+                <SearchBox value={search} onChange={setSearch} />
+                <label className="flex items-center gap-2 text-sm text-fg-muted">
+                  <input
+                    type="checkbox"
+                    checked={showRejected}
+                    onChange={(e) => setShowRejected(e.target.checked)}
+                  />
+                  Show rejected
+                </label>
+                {selected.size > 0 && (
+                  <span className="animate-fade-in-up text-sm text-fg-muted">{selected.size} selected</span>
+                )}
+              </div>
               <div className="flex gap-2">
+                {selected.size > 0 && (
+                  <div className="animate-fade-in-up flex gap-2">
+                    <Button variant="secondary" onClick={() => applyOverride("include")}>
+                      <CheckCircle2 size={14} />
+                      Include
+                    </Button>
+                    <Button variant="secondary" onClick={() => applyOverride("exclude")}>
+                      <XCircle size={14} />
+                      Exclude
+                    </Button>
+                  </div>
+                )}
                 <Button variant="ghost" onClick={clearResults}>
                   Clear results
                 </Button>
                 <ExportMenu
-                  passedCount={results.filter((r) => r.passed).length}
+                  passedCount={keyedResults.filter(({ r, key }) => effectivePassed(r, key)).length}
                   totalCount={results.length}
                   pending={exportMutation.isPending}
                   onExport={(scope) =>
-                    exportMutation.mutate(scope === "shortlist" ? results.filter((r) => r.passed) : results)
+                    exportMutation.mutate(
+                      scope === "shortlist"
+                        ? keyedResults.filter(({ r, key }) => effectivePassed(r, key)).map(({ r }) => r)
+                        : results,
+                    )
                   }
                 />
               </div>
@@ -361,6 +534,16 @@ export function FetchPage() {
             <Table>
               <THead>
                 <Tr>
+                  <Th className="w-8">
+                    <Checkbox
+                      checked={allSelected}
+                      disabled={visible.length === 0}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={toggleAll}
+                    />
+                  </Th>
                   <Th>Company</Th>
                   <Th>Title</Th>
                   <Th>Location</Th>
@@ -370,31 +553,78 @@ export function FetchPage() {
                 </Tr>
               </THead>
               <TBody>
-                {visible.map((r) => (
-                  <Tr key={`${r.source}-${r.external_id}`} className={!r.passed ? "opacity-50" : ""}>
-                    <Td className="font-medium">{r.company}</Td>
-                    <Td>
-                      <a href={r.url} target="_blank" rel="noreferrer" className="hover:text-accent hover:underline">
-                        {r.title}
-                      </a>
-                    </Td>
-                    <Td className="text-fg-muted">{r.location}</Td>
-                    <Td className="text-fg-muted" mono>
-                      {r.source}
-                    </Td>
-                    <Td>
-                      <div className="flex flex-wrap gap-1">
-                        {!r.passed && <Badge tone="bad">{r.reject_reason}</Badge>}
-                        {r.flags.map((f) => (
-                          <FlagBadge key={f} flag={f} />
-                        ))}
-                      </div>
-                    </Td>
-                    <Td className="text-fg-muted" mono>
-                      {r.posted_at ? new Date(r.posted_at).toLocaleDateString() : "—"}
+                {visible.map(({ r, key }, i) => {
+                  const override = overrides.get(key);
+                  const passed = effectivePassed(r, key);
+                  return (
+                    <Tr
+                      key={key}
+                      className={`animate-fade-in-up ${!passed ? "opacity-50" : ""} ${
+                        selected.has(key) ? "bg-accent-wash" : ""
+                      }`}
+                      style={{
+                        animationDelay: `${Math.min(i, 20) * 15}ms`,
+                        ...(!passed ? { "--fade-in-target-opacity": 0.5 } : {}),
+                      } as CSSProperties}
+                    >
+                      <Td>
+                        <Checkbox checked={selected.has(key)} onChange={() => toggleOne(key)} />
+                      </Td>
+                      <Td className="font-medium">{r.company}</Td>
+                      <Td>
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:text-accent hover:underline"
+                        >
+                          {r.title}
+                        </a>
+                      </Td>
+                      <Td className="text-fg-muted">{r.location}</Td>
+                      <Td className="text-fg-muted" mono>
+                        {r.source}
+                      </Td>
+                      <Td>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {!r.passed && r.reject_reason && override !== "include" && (
+                            <Badge tone="bad">{prettifyReason(r.reject_reason)}</Badge>
+                          )}
+                          {override !== "exclude" &&
+                            r.flags.map((f) => <FlagBadge key={f} flag={f} />)}
+                          {override && (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] leading-none ${
+                                override === "include" ? "bg-good-wash text-good" : "bg-bad-wash text-bad"
+                              }`}
+                            >
+                              {override === "include" ? "Manually included" : "Manually excluded"}
+                              <button
+                                type="button"
+                                onClick={() => clearOverride(key)}
+                                aria-label="Reset to automatic"
+                                title="Reset to automatic"
+                                className="hover:opacity-70"
+                              >
+                                <X size={10} />
+                              </button>
+                            </span>
+                          )}
+                        </div>
+                      </Td>
+                      <Td className="text-fg-muted" mono>
+                        {r.posted_at ? new Date(r.posted_at).toLocaleDateString() : "—"}
+                      </Td>
+                    </Tr>
+                  );
+                })}
+                {visible.length === 0 && (
+                  <Tr>
+                    <Td colSpan={7} className="py-8 text-center text-fg-muted">
+                      {search ? `No results match "${search}".` : "No results to show."}
                     </Td>
                   </Tr>
-                ))}
+                )}
               </TBody>
             </Table>
           </Card>

@@ -27,7 +27,7 @@ function TemplateCard({
   deletePending: boolean;
 }) {
   return (
-    <Card className="flex flex-col gap-2 overflow-hidden p-4">
+    <Card className="flex flex-col gap-2 overflow-hidden p-4 transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium">{template.name}</div>
         <div className="flex shrink-0 gap-1">
@@ -163,7 +163,7 @@ export function TemplatesPage() {
       )}
 
       {deleteMutation.isError && (
-        <p className="text-sm text-bad">
+        <p className="animate-fade-in-up text-sm text-bad">
           {(deleteMutation.error as { response?: { data?: { detail?: string } } })?.response
             ?.data?.detail ?? "Failed to delete template."}
         </p>
@@ -195,7 +195,7 @@ export function TemplatesPage() {
           </label>
 
           {error && (
-            <p className="mt-2 text-sm text-bad">
+            <p className="animate-fade-in-up mt-2 text-sm text-bad">
               {(error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
                 "Save failed."}
             </p>

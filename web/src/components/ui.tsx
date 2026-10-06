@@ -13,7 +13,7 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
   const base =
-    "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+    "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-[background-color,color,transform] active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100";
   const variants: Record<ButtonVariant, string> = {
     primary: "bg-accent text-accent-fg hover:bg-accent-hover",
     secondary: "bg-surface text-fg border border-border hover:bg-surface-hover",
@@ -60,7 +60,7 @@ export function IconButton({
       disabled={disabled}
       onClick={onClick}
       className={cx(
-        "relative inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
+        "relative inline-flex h-7 w-7 items-center justify-center rounded-md transition-[background-color,color,transform] active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100",
         iconButtonTones[tone],
       )}
     >
@@ -83,13 +83,21 @@ const badgeTones = {
 
 export function Badge({
   tone = "neutral",
+  className,
   children,
 }: {
   tone?: keyof typeof badgeTones;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <span className={cx("inline-block rounded px-1.5 py-0.5 font-mono text-[11px] leading-none", badgeTones[tone])}>
+    <span
+      className={cx(
+        "inline-block rounded px-1.5 py-0.5 font-mono text-[11px] leading-none",
+        badgeTones[tone],
+        className,
+      )}
+    >
       {children}
     </span>
   );
@@ -98,13 +106,49 @@ export function Badge({
 export function StatusBadge({ status }: { status: string }) {
   const tone =
     status === "ready" ? "good" : status === "failed" ? "bad" : status === "generating" ? "warn" : "neutral";
-  return <Badge tone={tone}>{status}</Badge>;
+  return (
+    <Badge tone={tone} className={status === "generating" ? "animate-pulse" : undefined}>
+      {status}
+    </Badge>
+  );
 }
 
 // Non-rejecting flags earned in gates.py - shown as warn badges so agency/C2C/
 // no-sponsorship postings are visible but not filtered out.
+const FLAG_LABELS: Record<string, string> = {
+  "no-sponsorship": "No Sponsorship",
+  c2c: "C2C",
+  "w2-only": "W2 Only",
+  agency: "Staffing Agency",
+  hybrid: "Hybrid",
+  "remote-unscoped": "Remote (Country Unspecified)",
+};
+
+function titleCase(slug: string) {
+  return slug
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+export function flagLabel(flag: string) {
+  return FLAG_LABELS[flag] ?? titleCase(flag);
+}
+
 export function FlagBadge({ flag }: { flag: string }) {
-  return <Badge tone="warn">{flag}</Badge>;
+  return <Badge tone="warn">{flagLabel(flag)}</Badge>;
+}
+
+// reject_reason values come straight from gates.py's apply_gates(): either a
+// fixed string or one with a field id / day count spliced in - matched here
+// before falling back to a generic title-case so new reasons don't show raw.
+export function prettifyReason(reason: string) {
+  if (reason === "not-in-country-or-remote") return "Not in country or remote";
+  const relevance = reason.match(/^not-(.+)-relevant$/);
+  if (relevance) return `Not relevant to ${titleCase(relevance[1])}`;
+  const age = reason.match(/^older-than-(\d+)-days$/);
+  if (age) return `Older than ${age[1]} days`;
+  return titleCase(reason);
 }
 
 export const Checkbox = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(

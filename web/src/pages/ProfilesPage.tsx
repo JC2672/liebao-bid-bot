@@ -14,6 +14,7 @@ import {
   type ProfileInput,
 } from "../lib/api";
 import { Button, Card, IconButton } from "../components/ui";
+import { Field } from "../components/Field";
 
 // lucide-react has no brand/logo icons (dropped a while back) - confirmed
 // by checking the installed package's exports directly rather than
@@ -37,7 +38,7 @@ function ProfileCard({
   deletePending: boolean;
 }) {
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <Card className="flex flex-col gap-3 p-4 transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium">{profile.name}</div>
         <div className="flex shrink-0 gap-1">
@@ -105,30 +106,6 @@ const EMPTY_FORM: ProfileInput = {
   country: "United States",
   prompt: "",
 };
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs text-fg-muted">{label}</span>
-      <input
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
-      />
-    </label>
-  );
-}
 
 export function ProfilesPage() {
   const queryClient = useQueryClient();
@@ -240,7 +217,7 @@ export function ProfilesPage() {
       )}
 
       {deleteMutation.isError && (
-        <p className="text-sm text-bad">
+        <p className="animate-fade-in-up text-sm text-bad">
           {(deleteMutation.error as { response?: { data?: { detail?: string } } })?.response
             ?.data?.detail ?? "Failed to delete profile."}
         </p>
@@ -250,27 +227,37 @@ export function ProfilesPage() {
         <Card className="p-4">
           <h3 className="mb-3 text-sm font-semibold">{creating ? "New Profile" : `Edit: ${editingId}`}</h3>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Full name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
+            <Field label="Full name" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
             <Field label="Location" value={form.location} onChange={(v) => setForm({ ...form, location: v })} />
             <Field label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
             <Field label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
             <Field label="LinkedIn" value={form.linkedin} onChange={(v) => setForm({ ...form, linkedin: v })} />
             <Field
               label="Sheet Web App URL"
+              required
               value={form.sheet_webapp_url}
               placeholder="optional until Applied is used - see docs/apps-script.gs"
               onChange={(v) => setForm({ ...form, sheet_webapp_url: v })}
             />
             <Field
               label="Sheet secret"
+              required
               value={form.sheet_secret}
               placeholder="the same SECRET set in that Apps Script"
               onChange={(v) => setForm({ ...form, sheet_secret: v })}
+              secret
             />
-            <Field label="Sheet tab name" value={form.sheet_tab} onChange={(v) => setForm({ ...form, sheet_tab: v })} />
+            <Field
+              label="Sheet tab name"
+              required
+              value={form.sheet_tab}
+              onChange={(v) => setForm({ ...form, sheet_tab: v })}
+            />
 
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs text-fg-muted">Output root (folder on disk)</span>
+              <span className="text-xs text-fg-muted">
+                Output root (folder on disk)<span className="text-bad"> *</span>
+              </span>
               <div className="flex gap-2">
                 <input
                   value={form.output_root}
@@ -285,7 +272,9 @@ export function ProfilesPage() {
             </label>
 
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs text-fg-muted">Template</span>
+              <span className="text-xs text-fg-muted">
+                Template<span className="text-bad"> *</span>
+              </span>
               <select
                 value={form.template_id}
                 onChange={(e) => setForm({ ...form, template_id: e.target.value })}
@@ -300,7 +289,9 @@ export function ProfilesPage() {
             </label>
 
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs text-fg-muted">Field (drives Fetch's query/title list/relevance)</span>
+              <span className="text-xs text-fg-muted">
+                Job Category<span className="text-bad"> *</span>
+              </span>
               <select
                 value={form.field_id}
                 onChange={(e) => setForm({ ...form, field_id: e.target.value })}
@@ -312,17 +303,23 @@ export function ProfilesPage() {
                   </option>
                 ))}
               </select>
+              <span className="text-xs text-fg-muted/70">Drives Fetch's query, title list, and relevance keywords.</span>
             </label>
 
             <Field
-              label="Country (drives the located-or-remote gate)"
+              label="Country"
+              required
+              placeholder="e.g. United States, US, USA"
+              hint="Drives the located-or-remote filter. Comma-separate aliases a posting might use."
               value={form.country}
               onChange={(v) => setForm({ ...form, country: v })}
             />
           </div>
 
           <label className="mt-3 flex flex-col gap-1.5">
-            <span className="text-xs text-fg-muted">Resume-tailoring prompt (JD is appended at generation time)</span>
+            <span className="text-xs text-fg-muted">
+              Resume-tailoring prompt (JD is appended at generation time)<span className="text-bad"> *</span>
+            </span>
             <textarea
               value={form.prompt}
               onChange={(e) => setForm({ ...form, prompt: e.target.value })}
@@ -332,7 +329,7 @@ export function ProfilesPage() {
           </label>
 
           {error && (
-            <p className="mt-2 text-sm text-bad">
+            <p className="animate-fade-in-up mt-2 text-sm text-bad">
               {(error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
                 "Save failed."}
             </p>

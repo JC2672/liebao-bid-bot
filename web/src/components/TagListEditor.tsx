@@ -11,11 +11,13 @@ export function TagListEditor({
   value,
   onChange,
   placeholder,
+  hint,
 }: {
   label: string;
   value: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
+  hint?: string;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -36,6 +38,7 @@ export function TagListEditor({
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-xs text-fg-muted">{label}</span>
+      {hint && <span className="-mt-1 text-xs text-fg-muted/70">{hint}</span>}
       <div className="flex gap-2">
         <input
           value={draft}

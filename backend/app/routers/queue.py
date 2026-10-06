@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import os
 import shutil
+import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from openpyxl import load_workbook
 
 from .. import generation, sheets
 from ..db import get_conn
-from ..models import BulkIds, Opportunity
+from ..models import BulkIds, ImportDirectRequest, Opportunity
 from ..profiles import get_profile
 
 router = APIRouter(prefix="/queue", tags=["queue"])
@@ -48,6 +49,52 @@ def list_queue(profile: str) -> list[Opportunity]:
     return [_row_to_opportunity(r) for r in rows]
 
 
+@router.get("/progress")
+def queue_progress(profile: str | None = None) -> dict:
+    """Profile-scoped remaining/ETA for the generation run currently in
+    flight - see generation.py's get_progress() for the actual tracking.
+    `profile` omitted: the floating status widget (App.tsx) isn't scoped
+    to any one profile, so it asks "is anything running, and whose" -
+    get_progress() resolves which profile that is on its own."""
+    return generation.get_progress(profile)
+
+
+def _applied_urls(prof) -> set[str]:
+    try:
+        return sheets.get_applied_urls(prof.sheet_webapp_url, prof.sheet_secret, prof.sheet_tab)
+    except RuntimeError:
+        return set()  # Sheet Web App not configured yet; don't block import
+
+
+def _dedupe_and_insert(
+    conn: sqlite3.Connection,
+    profile: str,
+    applied_urls: set[str],
+    existing_urls: set[str],
+    rows: list[tuple[str, str, str, str, str, str]],
+) -> tuple[list[int], int]:
+    """Shared by both import paths below - the dedupe rule (skip anything
+    already applied-to or already queued for this profile, by URL) and the
+    insert itself are the one thing that actually matters here; where the
+    rows came from (a hand-pruned XLSX upload, or a Fetch run's shortlist
+    passed straight through) is the only difference between the two callers."""
+    inserted_ids: list[int] = []
+    skipped = 0
+    for company, title, location, source, url, description in rows:
+        url = url.strip()
+        if not url or url in applied_urls or url in existing_urls:
+            skipped += 1
+            continue
+        cur = conn.execute(
+            """INSERT INTO opportunities (profile, company, title, location, source, url, description)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (profile, company, title, location, source, url, description),
+        )
+        inserted_ids.append(cur.lastrowid)
+        existing_urls.add(url)
+    return inserted_ids, skipped
+
+
 @router.post("/import")
 async def import_shortlist(profile: str, file: UploadFile) -> dict:
     """Accepts the XLSX exported by /fetch/export (pruned by hand in Excel),
@@ -60,10 +107,7 @@ async def import_shortlist(profile: str, file: UploadFile) -> dict:
     headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
     col = {h: i for i, h in enumerate(headers)}
 
-    try:
-        applied_urls = sheets.get_applied_urls(prof.sheet_webapp_url, prof.sheet_secret, prof.sheet_tab)
-    except RuntimeError:
-        applied_urls = set()  # Sheet Web App not configured yet; don't block import
+    applied_urls = _applied_urls(prof)
 
     with get_conn() as conn:
         existing_urls = {
@@ -71,30 +115,42 @@ async def import_shortlist(profile: str, file: UploadFile) -> dict:
                 "SELECT url FROM opportunities WHERE profile = ?", (profile,)
             ).fetchall()
         }
-
-        inserted, skipped = 0, 0
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            url = str(row[col["url"]] or "").strip()
-            if not url or url in applied_urls or url in existing_urls:
-                skipped += 1
-                continue
-            conn.execute(
-                """INSERT INTO opportunities (profile, company, title, location, source, url, description)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    profile,
-                    str(row[col["company"]] or ""),
-                    str(row[col["title"]] or ""),
-                    str(row[col["location"]] or ""),
-                    str(row[col["source"]] or ""),
-                    url,
-                    str(row[col["description"]] or ""),
-                ),
+        rows = [
+            (
+                str(row[col["company"]] or ""),
+                str(row[col["title"]] or ""),
+                str(row[col["location"]] or ""),
+                str(row[col["source"]] or ""),
+                str(row[col["url"]] or ""),
+                str(row[col["description"]] or ""),
             )
-            existing_urls.add(url)
-            inserted += 1
+            for row in ws.iter_rows(min_row=2, values_only=True)
+        ]
+        inserted_ids, skipped = _dedupe_and_insert(conn, profile, applied_urls, existing_urls, rows)
 
-    return {"inserted": inserted, "skipped": skipped}
+    return {"inserted": len(inserted_ids), "skipped": skipped}
+
+
+@router.post("/import-direct")
+def import_direct(body: ImportDirectRequest) -> dict:
+    """Same dedupe as /import above, but given a Fetch run's shortlist rows
+    directly instead of requiring an export-to-XLSX-then-upload roundtrip -
+    powers Fetch's "Queue after fetch" checkbox. Returns the newly-inserted
+    rows' ids (not just a count) so the caller can immediately bulk-generate
+    exactly those rows, without touching ones that were already queued."""
+    prof = get_profile(body.profile)
+    applied_urls = _applied_urls(prof)
+
+    with get_conn() as conn:
+        existing_urls = {
+            r["url"] for r in conn.execute(
+                "SELECT url FROM opportunities WHERE profile = ?", (body.profile,)
+            ).fetchall()
+        }
+        rows = [(r.company, r.title, r.location, r.source, r.url, r.description) for r in body.rows]
+        inserted_ids, skipped = _dedupe_and_insert(conn, body.profile, applied_urls, existing_urls, rows)
+
+    return {"inserted": len(inserted_ids), "skipped": skipped, "ids": inserted_ids}
 
 
 @router.post("/{opp_id}/applied")
@@ -146,9 +202,19 @@ def mark_applied(opp_id: int) -> dict:
 @router.post("/{opp_id}/remove")
 def remove_opportunity(opp_id: int) -> dict:
     with get_conn() as conn:
-        row = conn.execute("SELECT staging_dir FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
+        row = conn.execute("SELECT status, staging_dir FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Opportunity not found")
+        if row["status"] == "generating":
+            # Backend-side safety net, independent of the Queue screen's
+            # own lock on this button - generation.py's worker now bails
+            # out if a row's status moves away from `generating` before it
+            # gets dequeued (see run_generation's early-exit check), but
+            # that only covers "hasn't started yet". One already mid-flight
+            # through an actual ChatGPT call can't be interrupted; deleting
+            # it here wouldn't crash anything (the eventual write just
+            # affects zero rows), but it would waste that call for nothing.
+            raise HTTPException(409, "Opportunity is actively generating - wait for it to finish first")
         if row["staging_dir"] and Path(row["staging_dir"]).exists():
             shutil.rmtree(row["staging_dir"], ignore_errors=True)
         conn.execute("DELETE FROM opportunities WHERE id = ?", (opp_id,))
@@ -202,16 +268,23 @@ def bulk_remove(body: BulkIds) -> dict:
     if not body.ids:
         return {"removed": 0}
     with get_conn() as conn:
+        placeholders = ",".join("?" * len(body.ids))
+        # Same "generating" exclusion as the single-row /remove above,
+        # just silent here (skip rather than 400) - a bulk action already
+        # mixes statuses by nature, so one actively-generating row in the
+        # selection shouldn't block removing the rest of it.
         rows = conn.execute(
-            f"SELECT id, staging_dir FROM opportunities WHERE id IN ({','.join('?' * len(body.ids))})",
+            f"SELECT id, staging_dir FROM opportunities WHERE id IN ({placeholders}) AND status != 'generating'",
             body.ids,
         ).fetchall()
+        ids = [r["id"] for r in rows]
         for row in rows:
             if row["staging_dir"] and Path(row["staging_dir"]).exists():
                 shutil.rmtree(row["staging_dir"], ignore_errors=True)
-        conn.execute(
-            f"DELETE FROM opportunities WHERE id IN ({','.join('?' * len(body.ids))})", body.ids
-        )
+        if ids:
+            conn.execute(
+                f"DELETE FROM opportunities WHERE id IN ({','.join('?' * len(ids))})", ids
+            )
     return {"removed": len(rows)}
 
 

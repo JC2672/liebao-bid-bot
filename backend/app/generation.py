@@ -29,6 +29,9 @@ import asyncio
 import json
 import os
 import re
+import threading
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pydantic
@@ -183,6 +186,20 @@ async def run_generation(opp_id: int, open_when_ready: bool = False) -> None:
             row = conn.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
         if row is None:
             return
+        if row["status"] != "generating":
+            # Confirmed live as a real bug: bulk-generate marks every
+            # selected row `generating` and enqueues all of them up front,
+            # so a row near the back of the batch can sit in this asyncio
+            # queue for a while before the worker actually reaches it. If
+            # Retry (or Remove) touched it in that window, its status
+            # changed to `queued` (or it's gone) - and since nothing here
+            # used to re-check before running, the worker went ahead and
+            # generated it anyway, clobbering the user's retry/removal the
+            # moment it finished. Bailing out here instead makes Retry
+            # actually work as a cancel for a job that hasn't started yet
+            # - it just never runs, rather than running anyway and winning
+            # the race against whatever the user just did.
+            return
 
         profile = profiles_module.get_profile(row["profile"])
         prompt_md = profiles_module.get_prompt(row["profile"])
@@ -228,9 +245,15 @@ async def run_generation(opp_id: int, open_when_ready: bool = False) -> None:
         (staging_dir / "JD.txt").write_text(row["description"], encoding="utf-8")
 
         with get_conn() as conn:
+            # Guarded the same way `_on_status` already is above - if the
+            # status changed away from `generating` while the ChatGPT call
+            # was in flight (Retry/Remove can't stop a call already under
+            # way, only the earlier check above can), this write loses to
+            # whatever the user did instead of overwriting it.
             conn.execute(
                 "UPDATE opportunities SET status = 'ready', error = NULL, "
-                "resume_json = ?, staging_dir = ?, updated_at = datetime('now') WHERE id = ?",
+                "resume_json = ?, staging_dir = ?, updated_at = datetime('now') "
+                "WHERE id = ? AND status = 'generating'",
                 (resume.model_dump_json(), str(staging_dir), opp_id),
             )
 
@@ -242,7 +265,8 @@ async def run_generation(opp_id: int, open_when_ready: bool = False) -> None:
     except Exception as exc:  # noqa: BLE001 - land the row on `failed`, never crash the worker
         with get_conn() as conn:
             conn.execute(
-                "UPDATE opportunities SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ?",
+                "UPDATE opportunities SET status = 'failed', error = ?, updated_at = datetime('now') "
+                "WHERE id = ? AND status = 'generating'",
                 (str(exc)[:500], opp_id),
             )
 
@@ -252,14 +276,162 @@ async def run_generation(opp_id: int, open_when_ready: bool = False) -> None:
 _queue: asyncio.Queue[tuple[int, bool]] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
 
+# In-memory run-tracking for the estimated-time-remaining feature (Queue
+# screen) - mirrors routers/fetch.py's own lock-guarded progress state,
+# same reasoning: ephemeral, request-visible progress that doesn't need a
+# DB column, since `opportunities.updated_at` gets overwritten on every
+# status change and can't tell you how long any one job actually took.
+#
+# A "run" is whatever's currently in flight through this one-at-a-time
+# worker, across all profiles - it starts the moment the queue goes from
+# idle to non-idle, and ends (stats kept, not cleared, so a brief "done"
+# summary can still read them) once every pending job has finished and
+# nothing new has been enqueued. `_run_pending` tracks each still-running
+# job's profile so a caller can ask "how many of MINE are left".
+#
+# The pace estimate itself is a rolling average of the last few jobs'
+# actual durations (`_recent_durations`), not a cumulative one - a plain
+# cumulative average weights a slow first job (often a real ChatGPT
+# cold-start) as heavily as the fiftieth, so it's slow to reflect the
+# run's actual current pace and never recovers from one early outlier.
+# Global, not per-profile: same worker, same pace, regardless of whose row
+# it happens to be processing. Scoped to the current run, though - cleared
+# in `enqueue()` on the idle->active transition, so a new run's estimate
+# starts from scratch rather than riding on whatever pace the previous run
+# happened to end at.
+#
+# Each duration is measured strictly between two real events - the moment
+# the worker actually dequeues a job (`_job_started_at`) and the moment it
+# finishes - never against a live "now". Confirmed live as a real bug in
+# an earlier version that measured against `now()` while a job was still
+# mid-flight: the estimate kept inflating every single poll tick even
+# though nothing new had actually finished, because elapsed time kept
+# advancing while the completed-job count didn't. Keeping `now()` entirely
+# out of the duration/average math (it's only used for the still-running
+# `eta_seconds` multiplication, not for measuring how long anything took)
+# makes that class of bug structurally impossible to reintroduce.
+_progress_lock = threading.Lock()
+_run_active = False
+_run_started_at: datetime | None = None
+_run_finished_at: datetime | None = None
+_run_profile_totals: dict[str, int] = {}
+_run_pending: dict[int, str] = {}  # opp_id -> profile, for jobs not yet finished
+_job_started_at: dict[int, datetime] = {}  # opp_id -> when the worker actually dequeued it
+_recent_durations: deque[float] = deque(maxlen=5)  # last few completed jobs' real durations, seconds
+_run_outcomes: dict[str, dict[str, int]] = {}  # profile -> {"ready"|"failed"|"cancelled": n}, this run
+
 
 def enqueue(opp_id: int, open_when_ready: bool = False) -> None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT profile FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
+    profile = row["profile"] if row else ""
+
+    global _run_active, _run_started_at, _run_finished_at, _run_profile_totals, _run_pending, _run_outcomes
+    with _progress_lock:
+        if not _run_active:
+            _run_active = True
+            _run_started_at = datetime.now(timezone.utc)
+            _run_finished_at = None
+            _run_profile_totals = {}
+            _run_pending = {}
+            _run_outcomes = {}
+            # Each run estimates its own pace from scratch - leftover
+            # durations from whatever last ran would otherwise make this
+            # run's very first job report a stale ETA before anything
+            # here has actually finished.
+            _recent_durations.clear()
+        _run_profile_totals[profile] = _run_profile_totals.get(profile, 0) + 1
+        _run_pending[opp_id] = profile
+
     _queue.put_nowait((opp_id, open_when_ready))
+
+
+def _mark_job_started(opp_id: int) -> None:
+    with _progress_lock:
+        _job_started_at[opp_id] = datetime.now(timezone.utc)
+
+
+def _mark_run_job_done(opp_id: int, outcome: str | None) -> None:
+    """`outcome` is the row's actual final status - `ready`/`failed` if
+    generation really ran to completion, or `cancelled` if the row's
+    status had already moved away from `generating` by the time the
+    worker reached it (Retry/Remove while it was still waiting its turn -
+    see the early-exit check in run_generation()) or the row was removed
+    outright. `None` only for a row this run never heard of, which
+    shouldn't happen but isn't worth raising over."""
+    global _run_active, _run_finished_at
+    with _progress_lock:
+        profile = _run_pending.pop(opp_id, None)
+        started = _job_started_at.pop(opp_id, None)
+        if started is not None and outcome in ("ready", "failed"):
+            # Only a real attempt's duration counts toward the pace
+            # average - a cancelled job never actually ran.
+            _recent_durations.append((datetime.now(timezone.utc) - started).total_seconds())
+        if profile is not None and outcome is not None:
+            counts = _run_outcomes.setdefault(profile, {})
+            counts[outcome] = counts.get(outcome, 0) + 1
+        if not _run_pending and _queue.empty():
+            _run_active = False
+            _run_finished_at = datetime.now(timezone.utc)
+
+
+def get_progress(profile: str | None = None) -> dict:
+    """Profile-scoped remaining/ETA, global rolling-average pace - see the
+    module comment above `_progress_lock` for why. `remaining` only counts
+    jobs still actually processing for this profile (bulk-generate flips
+    every selected row to `generating` immediately, but the worker still
+    works through them one at a time) - "my part of the current run," not
+    "everything queued app-wide". `total_elapsed_seconds` is only set once
+    the run has actually finished - a real wall-clock fact for a "done in
+    Xm Ys" summary, deliberately not exposed while still running (where it
+    would just be the same now()-leak this was rewritten to avoid).
+
+    `profile=None` resolves to whichever profile the current run actually
+    belongs to - the floating status widget (App.tsx) isn't scoped to any
+    one tab/profile, so it has no profile of its own to ask about; it just
+    wants "is anything running, and whose is it." The resolved id comes
+    back as `profile` in the response. If nothing is running, resolves to
+    nothing and the response reports inactive - there's no profile to
+    attribute idle time to."""
+    with _progress_lock:
+        if profile is None:
+            profile = next(iter(_run_pending.values()), None) or next(iter(_run_profile_totals), None)
+        durations = list(_recent_durations)
+        remaining = sum(1 for p in _run_pending.values() if p == profile) if profile else 0
+        total = _run_profile_totals.get(profile, 0) if profile else 0
+        started_at = _run_started_at.isoformat() if _run_started_at else None
+        finished_at = _run_finished_at.isoformat() if _run_finished_at else None
+        active = _run_active
+        outcomes = dict(_run_outcomes.get(profile, {})) if profile else {}
+        total_elapsed_seconds = (
+            (_run_finished_at - _run_started_at).total_seconds()
+            if not active and _run_finished_at and _run_started_at
+            else None
+        )
+
+    avg_seconds_per_job = sum(durations) / len(durations) if durations else None
+    eta_seconds = avg_seconds_per_job * remaining if avg_seconds_per_job is not None else None
+    return {
+        "active": active,
+        "profile": profile,
+        "completed": total - remaining,
+        "total": total,
+        "remaining": remaining,
+        "ready": outcomes.get("ready", 0),
+        "failed": outcomes.get("failed", 0),
+        "cancelled": outcomes.get("cancelled", 0),
+        "avg_seconds_per_job": avg_seconds_per_job,
+        "eta_seconds": eta_seconds,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "total_elapsed_seconds": total_elapsed_seconds,
+    }
 
 
 async def _worker_loop() -> None:
     while True:
         opp_id, open_when_ready = await _queue.get()
+        _mark_job_started(opp_id)
         try:
             await run_generation(opp_id, open_when_ready)
         except asyncio.CancelledError:
@@ -280,7 +452,54 @@ async def _worker_loop() -> None:
             except Exception:  # noqa: BLE001 - even this best-effort write failing shouldn't kill the loop
                 pass
         finally:
+            # Read the row's actual final status rather than assuming -
+            # normally `ready`/`failed` (run_generation leaves it at
+            # exactly one of those), but it can also be `queued` (Retry hit
+            # it before the worker got here - the early-exit check in
+            # run_generation skipped it entirely, on purpose, see there)
+            # or simply gone (Removed the same way). Both count as
+            # `cancelled`: real work never happened, so it's neither a
+            # success nor a failure.
+            with get_conn() as conn:
+                row = conn.execute("SELECT status FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
+            status = row["status"] if row else None
+            outcome = status if status in ("ready", "failed") else "cancelled"
+            _mark_run_job_done(opp_id, outcome)
             _queue.task_done()
+
+
+def reconcile_interrupted_jobs() -> int:
+    """Called once from main.py's startup event, before anything else - any
+    row still at `generating` the moment the backend boots up is
+    necessarily orphaned, never a real in-flight job: this process's
+    in-memory worker state (the asyncio queue, `_run_pending`, etc.) starts
+    empty every time, so nothing here could legitimately be mid-generation
+    before `start_worker()` below has even run once.
+
+    Confirmed live as a real lockout: the Queue screen now treats any
+    `generating` row as "a batch is running" and locks every other
+    non-ready row until it clears - exactly right for a real run, but a
+    stale row left over from a force-closed browser/backend (the ChatGPT
+    Playwright window killed mid-call, or the server itself stopped before
+    the job finished) never clears on its own, since nothing is left to
+    finish it. Without this, that one leftover row locks the entire queue
+    for that profile forever, with no action able to reach it either (Retry
+    is deliberately locked out right along with everything else).
+
+    Reset to `queued` - not `failed` - since nothing about what actually
+    happened belongs on this row: confirmed live that an interrupted job
+    never gets as far as writing a staging folder or `resume_json` (the
+    disk write happens before the DB write in run_generation(), and
+    neither exists for a row caught here), so there's no real failure to
+    report either, just an attempt that never got anywhere. `queued`
+    treats it exactly like it was never clicked - one Generate away from a
+    clean attempt, no stale error note left behind to clear."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE opportunities SET status = 'queued', error = NULL, "
+            "updated_at = datetime('now') WHERE status = 'generating'"
+        )
+        return cur.rowcount
 
 
 def start_worker() -> None:

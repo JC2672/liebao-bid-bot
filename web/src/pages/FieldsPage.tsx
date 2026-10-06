@@ -12,6 +12,7 @@ import {
 } from "../lib/api";
 import { Badge, Button, Card, IconButton } from "../components/ui";
 import { TagListEditor } from "../components/TagListEditor";
+import { Field } from "../components/Field";
 
 function FieldCard({
   field,
@@ -25,7 +26,7 @@ function FieldCard({
   deletePending: boolean;
 }) {
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <Card className="flex flex-col gap-3 p-4 transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium">{field.name}</div>
         <div className="flex shrink-0 gap-1">
@@ -70,30 +71,6 @@ const EMPTY_FORM: FieldInput = {
   relevance_allow: [],
   relevance_deny: [],
 };
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs text-fg-muted">{label}</span>
-      <input
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-accent"
-      />
-    </label>
-  );
-}
 
 export function FieldsPage() {
   const queryClient = useQueryClient();
@@ -159,15 +136,15 @@ export function FieldsPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Fetch options - Fields</h2>
+        <h2 className="text-sm font-semibold">Job Categories</h2>
         <Button variant="primary" onClick={startCreate}>
-          + New Field
+          + New Job Category
         </Button>
       </div>
 
       {fieldsQuery.data?.length === 0 ? (
         <Card className="p-8 text-center text-sm text-fg-muted">
-          No fields yet. Create one so a profile has a query term/title list/
+          No job categories yet. Create one so a profile has a query term/title list/
           relevance keywords to fetch with.
         </Card>
       ) : (
@@ -179,7 +156,7 @@ export function FieldsPage() {
               onEdit={() => startEdit(f)}
               deletePending={deleteMutation.isPending}
               onDelete={() => {
-                if (confirm(`Delete field "${f.name}"? This cannot be undone.`)) {
+                if (confirm(`Delete job category "${f.name}"? This cannot be undone.`)) {
                   deleteMutation.mutate(f.id);
                 }
               }}
@@ -189,15 +166,17 @@ export function FieldsPage() {
       )}
 
       {deleteMutation.isError && (
-        <p className="text-sm text-bad">
+        <p className="animate-fade-in-up text-sm text-bad">
           {(deleteMutation.error as { response?: { data?: { detail?: string } } })?.response
-            ?.data?.detail ?? "Failed to delete field."}
+            ?.data?.detail ?? "Failed to delete job category."}
         </p>
       )}
 
       {isOpen && (
         <Card className="p-4">
-          <h3 className="mb-3 text-sm font-semibold">{creating ? "New Field" : `Edit: ${editingId}`}</h3>
+          <h3 className="mb-3 text-sm font-semibold">
+            {creating ? "New Job Category" : `Edit: ${editingId}`}
+          </h3>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
             <Field
@@ -210,19 +189,22 @@ export function FieldsPage() {
 
           <div className="mt-3 flex flex-col gap-3">
             <TagListEditor
-              label="Title list (for sources where a bare query term is a trap)"
+              label="Title list"
+              hint="Used for sources where a bare query term is a trap."
               value={form.title_list}
               placeholder="e.g. Salesforce Developer"
               onChange={(v) => setForm({ ...form, title_list: v })}
             />
             <TagListEditor
-              label="Relevance allow keywords (a posting's title must match one of these)"
+              label="Match keywords"
+              hint="A posting's title must match one of these."
               value={form.relevance_allow}
               placeholder="e.g. salesforce"
               onChange={(v) => setForm({ ...form, relevance_allow: v })}
             />
             <TagListEditor
-              label="Relevance deny keywords (title must not match any of these)"
+              label="Exclude keywords"
+              hint="A posting's title must not match any of these."
               value={form.relevance_deny}
               placeholder="e.g. account executive"
               onChange={(v) => setForm({ ...form, relevance_deny: v })}
@@ -230,7 +212,7 @@ export function FieldsPage() {
           </div>
 
           {error && (
-            <p className="mt-2 text-sm text-bad">
+            <p className="animate-fade-in-up mt-2 text-sm text-bad">
               {(error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
                 "Save failed."}
             </p>
