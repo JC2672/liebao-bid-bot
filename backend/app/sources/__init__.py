@@ -30,10 +30,7 @@ from . import (
     jobspresso_source,
     jobspy_source,
     monster_source,
-    remoteok_source,
-    remotive_source,
     talent_source,
-    weworkremotely_source,
     workingnomads_source,
 )
 
@@ -41,9 +38,6 @@ SOURCES: dict[str, callable] = {
     "linkedin": jobspy_source.fetch_linkedin,
     "indeed": jobspy_source.fetch_indeed,
     "dice": dice_source.fetch_dice,
-    "remotive": remotive_source.fetch_remotive,
-    "remoteok": remoteok_source.fetch_remoteok,
-    "weworkremotely": weworkremotely_source.fetch_weworkremotely,
     "jobgether": jobgether_source.fetch_jobgether,
     "jobright": jobright_source.fetch_jobright,
     "himalayas": himalayas_source.fetch_himalayas,
@@ -62,8 +56,8 @@ SOURCES: dict[str, callable] = {
 # The Muse: investigated and NOT integrated. Its public API has no free-text
 # search and no category matching "Salesforce" (or CRM/tech at all usefully);
 # it's 400k+ jobs total, so scanning enough pages to find relevant postings
-# by chance isn't practical the way it is for We Work Remotely/Arbeitnow/
-# Working Nomads (each only tens-to-low-hundreds of postings total).
+# by chance isn't practical the way it is for Arbeitnow/Working Nomads (each
+# only tens-to-low-hundreds of postings total).
 
 # Obra: investigated directly and NOT integrated - and not revisitable
 # without real credentials. Its web app is gated behind Firebase App Check,

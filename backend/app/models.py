@@ -82,6 +82,15 @@ class FetchStatusResponse(BaseModel):
 OpportunityStatus = Literal["queued", "generating", "ready", "failed"]
 
 
+class CompanyMatch(BaseModel):
+    """One past application at a company the Queue table is flagging a new
+    row against - see Opportunity.company_seen_detail."""
+
+    title: str
+    date: str
+    stage: str
+
+
 class Opportunity(BaseModel):
     id: int | None = None
     profile: str
@@ -95,12 +104,42 @@ class Opportunity(BaseModel):
     error: str | None = None
     resume_json: str | None = None
     staging_dir: str | None = None
+    # The posting's own stated date, not when it was added here - only
+    # ever set by Quick Apply today (nothing else collects it), since
+    # nothing fetched this row to know a date otherwise.
+    posted_at: str | None = None
+    # True if this company already showed up in the Applied sheet at the
+    # moment this row was imported (CSV/XLSX or Fetch's "Queue after
+    # fetch") - a flag for the Queue table, not a dedupe block; set once on
+    # insert, never recomputed later.
+    company_seen: bool = False
+    # The actual past application(s) at that company (title/date/stage),
+    # same snapshot-at-import-time as company_seen above - what the Queue
+    # table's hover-for-detail on that flag actually shows.
+    company_seen_detail: list[CompanyMatch] = []
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
 
 class BulkIds(BaseModel):
     ids: list[int]
+
+
+class QuickApplyInput(BaseModel):
+    """Body for POST /queue/quick-apply - a single posting found outside
+    the normal Fetch pipeline entirely (a recruiter email, a posting you
+    found yourself), entered by hand instead of fetched. `location` isn't
+    collected - the form deliberately only asks for what Quick Apply
+    actually needs (profile, company, title, the JD itself), not every
+    column the table happens to have."""
+
+    profile: str
+    company: str
+    title: str
+    source: str = ""
+    posted_at: str | None = None
+    url: str
+    description: str
 
 
 class QueueImportRow(BaseModel):

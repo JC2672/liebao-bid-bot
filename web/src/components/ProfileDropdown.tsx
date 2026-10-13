@@ -10,11 +10,13 @@ export function ProfileDropdown({
   value,
   onChange,
   disabled,
+  className = "w-56",
 }: {
   profiles: { id: string; name: string }[];
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -35,7 +37,7 @@ export function ProfileDropdown({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-56 items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none transition-colors hover:bg-surface-hover focus:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+        className={`flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none transition-colors hover:bg-surface-hover focus:border-accent disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
       >
         <span className="truncate">{selected?.name ?? "Select profile"}</span>
         <ChevronDown
@@ -45,7 +47,7 @@ export function ProfileDropdown({
       </button>
 
       {open && (
-        <div className="animate-scale-in absolute left-0 z-10 mt-1 w-56 overflow-hidden rounded-md border border-border bg-surface shadow-lg">
+        <div className={`animate-scale-in absolute left-0 z-10 mt-1 overflow-hidden rounded-md border border-border bg-surface shadow-lg ${className}`}>
           {profiles.map((p) => (
             <button
               key={p.id}

@@ -136,15 +136,15 @@ export function FieldsPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Job Categories</h2>
+        <h2 className="text-sm font-semibold">Searches</h2>
         <Button variant="primary" onClick={startCreate}>
-          + New Job Category
+          + New Search
         </Button>
       </div>
 
       {fieldsQuery.data?.length === 0 ? (
         <Card className="p-8 text-center text-sm text-fg-muted">
-          No job categories yet. Create one so a profile has a query term/title list/
+          No searches yet. Create one so a profile has a query term/title list/
           relevance keywords to fetch with.
         </Card>
       ) : (
@@ -156,7 +156,7 @@ export function FieldsPage() {
               onEdit={() => startEdit(f)}
               deletePending={deleteMutation.isPending}
               onDelete={() => {
-                if (confirm(`Delete job category "${f.name}"? This cannot be undone.`)) {
+                if (confirm(`Delete search "${f.name}"? This cannot be undone.`)) {
                   deleteMutation.mutate(f.id);
                 }
               }}
@@ -168,14 +168,14 @@ export function FieldsPage() {
       {deleteMutation.isError && (
         <p className="animate-fade-in-up text-sm text-bad">
           {(deleteMutation.error as { response?: { data?: { detail?: string } } })?.response
-            ?.data?.detail ?? "Failed to delete job category."}
+            ?.data?.detail ?? "Failed to delete search."}
         </p>
       )}
 
       {isOpen && (
         <Card className="p-4">
           <h3 className="mb-3 text-sm font-semibold">
-            {creating ? "New Job Category" : `Edit: ${editingId}`}
+            {creating ? "New Search" : `Edit: ${editingId}`}
           </h3>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />

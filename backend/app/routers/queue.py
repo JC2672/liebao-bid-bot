@@ -10,6 +10,7 @@ this request, does the actual work).
 from __future__ import annotations
 
 import io
+import json
 import os
 import shutil
 import sqlite3
@@ -21,7 +22,7 @@ from openpyxl import load_workbook
 
 from .. import generation, sheets
 from ..db import get_conn
-from ..models import BulkIds, ImportDirectRequest, Opportunity
+from ..models import BulkIds, CompanyMatch, ImportDirectRequest, Opportunity, QuickApplyInput
 from ..profiles import get_profile
 
 router = APIRouter(prefix="/queue", tags=["queue"])
@@ -31,11 +32,14 @@ STAGING_DIR = DATA_DIR / "staging"
 
 
 def _row_to_opportunity(row) -> Opportunity:
+    detail_json = row["company_seen_detail"]
     return Opportunity(
         id=row["id"], profile=row["profile"], company=row["company"], title=row["title"],
         location=row["location"], source=row["source"], url=row["url"],
         description=row["description"], status=row["status"], error=row["error"],
         resume_json=row["resume_json"], staging_dir=row["staging_dir"],
+        posted_at=row["posted_at"], company_seen=bool(row["company_seen"]),
+        company_seen_detail=[CompanyMatch(**m) for m in json.loads(detail_json)] if detail_json else [],
         created_at=row["created_at"], updated_at=row["updated_at"],
     )
 
@@ -66,29 +70,58 @@ def _applied_urls(prof) -> set[str]:
         return set()  # Sheet Web App not configured yet; don't block import
 
 
+def _applied_company_matches(prof, companies: set[str]) -> dict[str, list[dict]]:
+    """`companies` is this one import batch's own company names, not every
+    company ever applied-to - see sheets.get_applied_rows_for_companies for
+    why that's the one that's actually called here."""
+    if not companies:
+        return {}
+    try:
+        return sheets.get_applied_rows_for_companies(prof.sheet_webapp_url, prof.sheet_secret, prof.sheet_tab, companies)
+    except RuntimeError:
+        return {}  # Sheet Web App not configured yet; nothing to flag against
+
+
 def _dedupe_and_insert(
     conn: sqlite3.Connection,
     profile: str,
     applied_urls: set[str],
     existing_urls: set[str],
-    rows: list[tuple[str, str, str, str, str, str]],
+    rows: list[tuple[str, str, str, str, str, str, str | None]],
+    applied_company_matches: dict[str, list[dict]] | None = None,
 ) -> tuple[list[int], int]:
-    """Shared by both import paths below - the dedupe rule (skip anything
-    already applied-to or already queued for this profile, by URL) and the
-    insert itself are the one thing that actually matters here; where the
-    rows came from (a hand-pruned XLSX upload, or a Fetch run's shortlist
-    passed straight through) is the only difference between the two callers."""
+    """Shared by all three import paths below - the dedupe rule (skip
+    anything already applied-to or already queued for this profile, by
+    URL) and the insert itself are the one thing that actually matters
+    here; where the rows came from (a hand-pruned XLSX upload, a Fetch
+    run's shortlist passed straight through, or a single hand-typed Quick
+    Apply entry) is the only difference between the callers. The last
+    tuple element is `posted_at` - every caller except Quick Apply just
+    passes None, since nothing else collects a posting's own date.
+
+    `applied_company_matches`, if given, flags (doesn't skip) a row whose
+    company already shows up in the Applied sheet - a "you've gone after
+    this company before" heads-up for the Queue table, not a dedupe rule; a
+    repeat company at a different posting is still worth seeing, just
+    worth flagging. The matched past application(s) (title/date/stage) are
+    stored alongside the flag so the Queue table can show which ones, not
+    just that there were some. Only the CSV/XLSX import and Fetch's "Queue
+    after fetch" pass this - Quick Apply doesn't, since it's always one
+    deliberate posting, not a batch worth cross-checking."""
     inserted_ids: list[int] = []
     skipped = 0
-    for company, title, location, source, url, description in rows:
+    for company, title, location, source, url, description, posted_at in rows:
         url = url.strip()
         if not url or url in applied_urls or url in existing_urls:
             skipped += 1
             continue
+        matches = (applied_company_matches or {}).get(company.strip().lower(), [])
         cur = conn.execute(
-            """INSERT INTO opportunities (profile, company, title, location, source, url, description)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (profile, company, title, location, source, url, description),
+            """INSERT INTO opportunities
+               (profile, company, title, location, source, url, description, posted_at, company_seen, company_seen_detail)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (profile, company, title, location, source, url, description, posted_at,
+             bool(matches), json.dumps(matches) if matches else None),
         )
         inserted_ids.append(cur.lastrowid)
         existing_urls.add(url)
@@ -109,24 +142,30 @@ async def import_shortlist(profile: str, file: UploadFile) -> dict:
 
     applied_urls = _applied_urls(prof)
 
+    rows = [
+        (
+            str(row[col["company"]] or ""),
+            str(row[col["title"]] or ""),
+            str(row[col["location"]] or ""),
+            str(row[col["source"]] or ""),
+            str(row[col["url"]] or ""),
+            str(row[col["description"]] or ""),
+            None,
+        )
+        for row in ws.iter_rows(min_row=2, values_only=True)
+    ]
+    batch_companies = {r[0].strip().lower() for r in rows if r[0].strip()}
+    applied_company_matches = _applied_company_matches(prof, batch_companies)
+
     with get_conn() as conn:
         existing_urls = {
             r["url"] for r in conn.execute(
                 "SELECT url FROM opportunities WHERE profile = ?", (profile,)
             ).fetchall()
         }
-        rows = [
-            (
-                str(row[col["company"]] or ""),
-                str(row[col["title"]] or ""),
-                str(row[col["location"]] or ""),
-                str(row[col["source"]] or ""),
-                str(row[col["url"]] or ""),
-                str(row[col["description"]] or ""),
-            )
-            for row in ws.iter_rows(min_row=2, values_only=True)
-        ]
-        inserted_ids, skipped = _dedupe_and_insert(conn, profile, applied_urls, existing_urls, rows)
+        inserted_ids, skipped = _dedupe_and_insert(
+            conn, profile, applied_urls, existing_urls, rows, applied_company_matches
+        )
 
     return {"inserted": len(inserted_ids), "skipped": skipped}
 
@@ -141,16 +180,63 @@ def import_direct(body: ImportDirectRequest) -> dict:
     prof = get_profile(body.profile)
     applied_urls = _applied_urls(prof)
 
+    rows = [(r.company, r.title, r.location, r.source, r.url, r.description, None) for r in body.rows]
+    batch_companies = {r[0].strip().lower() for r in rows if r[0].strip()}
+    applied_company_matches = _applied_company_matches(prof, batch_companies)
+
     with get_conn() as conn:
         existing_urls = {
             r["url"] for r in conn.execute(
                 "SELECT url FROM opportunities WHERE profile = ?", (body.profile,)
             ).fetchall()
         }
-        rows = [(r.company, r.title, r.location, r.source, r.url, r.description) for r in body.rows]
-        inserted_ids, skipped = _dedupe_and_insert(conn, body.profile, applied_urls, existing_urls, rows)
+        inserted_ids, skipped = _dedupe_and_insert(
+            conn, body.profile, applied_urls, existing_urls, rows, applied_company_matches
+        )
 
     return {"inserted": len(inserted_ids), "skipped": skipped, "ids": inserted_ids}
+
+
+@router.post("/quick-apply")
+def quick_apply(body: QuickApplyInput) -> dict:
+    """Skips Fetch (and the batch/dedupe-against-a-run it implies)
+    entirely, for a single posting found outside the normal pipeline - a
+    recruiter email, a posting you found yourself. Same applied/queue
+    dedupe every other import path already does, but immediately kicks
+    off generation the instant it's actually inserted (open_when_ready
+    included, same as the single-row Generate button) - the whole point
+    is "right now," not "added to a batch to get to eventually". Returns
+    `id: None` rather than a count when the dedupe caught it as a repeat -
+    there's only ever one row here, so the caller needs to know which
+    outcome happened, not just how many."""
+    prof = get_profile(body.profile)
+    applied_urls = _applied_urls(prof)
+
+    with get_conn() as conn:
+        existing_urls = {
+            r["url"] for r in conn.execute(
+                "SELECT url FROM opportunities WHERE profile = ?", (body.profile,)
+            ).fetchall()
+        }
+        source = body.source.strip() or "Quick Apply"
+        rows = [(body.company, body.title, "", source, body.url, body.description, body.posted_at)]
+        inserted_ids, skipped = _dedupe_and_insert(conn, body.profile, applied_urls, existing_urls, rows)
+        if inserted_ids:
+            # Without this, run_generation()'s own guard (it bails out
+            # unless the row is already `generating` - see its docstring)
+            # silently no-ops this job: it'd sit at `queued` forever until
+            # someone went to the Queue tab and ran it through
+            # bulk-generate instead, which is exactly the "go back to
+            # Queue" round-trip Quick Apply exists to skip.
+            conn.execute(
+                "UPDATE opportunities SET status = 'generating', updated_at = datetime('now') WHERE id = ?",
+                (inserted_ids[0],),
+            )
+
+    if inserted_ids:
+        generation.enqueue(inserted_ids[0], open_when_ready=True)
+        return {"id": inserted_ids[0], "duplicate": False}
+    return {"id": None, "duplicate": skipped > 0}
 
 
 @router.post("/{opp_id}/applied")
@@ -179,7 +265,7 @@ def mark_applied(opp_id: int) -> dict:
         sheets.append_applied_row(
             prof.sheet_webapp_url, prof.sheet_secret, prof.sheet_tab,
             date=date.today().isoformat(), company=opp.company, title=opp.title,
-            source=opp.source, url=opp.url,
+            source=opp.source, url=opp.url, stage="Applied",
         )
     except RuntimeError as exc:
         raise HTTPException(500, f"Sheet append failed, nothing was moved: {exc}") from exc

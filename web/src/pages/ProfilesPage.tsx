@@ -290,7 +290,7 @@ export function ProfilesPage() {
 
             <label className="flex flex-col gap-1.5">
               <span className="text-xs text-fg-muted">
-                Job Category<span className="text-bad"> *</span>
+                Search<span className="text-bad"> *</span>
               </span>
               <select
                 value={form.field_id}

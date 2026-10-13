@@ -5,7 +5,6 @@ import {
   bulkGenerate,
   bulkRemove,
   bulkRetry,
-  generateOpportunity,
   importShortlist,
   listProfiles,
   listQueue,
@@ -15,6 +14,7 @@ import {
   retryOpportunity,
   type OpportunityStatus,
 } from "../lib/api";
+import { CompanyHistoryHint } from "../components/CompanyHistoryHint";
 import { ProfileDropdown } from "../components/ProfileDropdown";
 import { SearchBox } from "../components/SearchBox";
 import { Button, Card, Checkbox, IconButton, StatusBadge, TBody, THead, Table, Td, Th, Tr } from "../components/ui";
@@ -85,7 +85,6 @@ export function QueuePage({
   const appliedMutation = useMutation({ mutationFn: markApplied, onSuccess: clearAndInvalidate });
   const removeMutation = useMutation({ mutationFn: removeOpportunity, onSuccess: clearAndInvalidate });
   const retryMutation = useMutation({ mutationFn: retryOpportunity, onSuccess: clearAndInvalidate });
-  const generateMutation = useMutation({ mutationFn: generateOpportunity, onSuccess: clearAndInvalidate });
   const bulkRemoveMutation = useMutation({
     mutationFn: bulkRemove,
     onSuccess: () => {
@@ -270,6 +269,7 @@ export function QueuePage({
               <Th>Company</Th>
               <Th>Title</Th>
               <Th>Location</Th>
+              <Th>Source</Th>
               <Th>Status</Th>
               <Th>Actions</Th>
             </Tr>
@@ -278,7 +278,6 @@ export function QueuePage({
             {filteredRows.map((o, i) => {
               const waitTitle = "A batch is generating - wait for it to finish first";
               const rowIsLocked = rowLocked(o.status);
-              const generateDisabled = o.status !== "queued" || generateMutation.isPending || rowIsLocked;
               const retryDisabled =
                 retryMutation.isPending || rowIsLocked || (o.status !== "failed" && o.status !== "generating");
               const removeDisabled = removeMutation.isPending || rowIsLocked;
@@ -302,9 +301,17 @@ export function QueuePage({
                   <Td>
                     <Checkbox checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} />
                   </Td>
-                  <Td className="font-medium">{o.company}</Td>
+                  <Td className="font-medium">
+                    <span className="inline-flex items-center gap-1.5">
+                      {o.company}
+                      <CompanyHistoryHint matches={o.company_seen_detail} />
+                    </span>
+                  </Td>
                   <Td>{o.title}</Td>
                   <Td className="text-fg-muted">{o.location}</Td>
+                  <Td className="text-fg-muted" mono>
+                    {o.source}
+                  </Td>
                   <Td>
                     <StatusBadge status={o.status} />
                     {/* `error` doubles as a live in-progress note while
@@ -329,14 +336,6 @@ export function QueuePage({
                         onClick={() => openFolder(o.id)}
                       >
                         <FolderOpen size={16} />
-                      </IconButton>
-                      <IconButton
-                        title={rowIsLocked ? waitTitle : "Generate"}
-                        tone="primary"
-                        disabled={generateDisabled}
-                        onClick={() => generateMutation.mutate(o.id)}
-                      >
-                        <Sparkles size={16} />
                       </IconButton>
                       <IconButton
                         title={rowIsLocked ? waitTitle : "Retry"}
@@ -368,7 +367,7 @@ export function QueuePage({
             })}
             {filteredRows.length === 0 && (
               <Tr>
-                <Td colSpan={6} className="py-8 text-center text-fg-muted">
+                <Td colSpan={7} className="py-8 text-center text-fg-muted">
                   {rows.length === 0
                     ? "Queue is empty for this profile. Import a shortlist to get started."
                     : `No results match "${search}".`}

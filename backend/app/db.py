@@ -35,10 +35,34 @@ CREATE INDEX IF NOT EXISTS idx_opportunities_profile_status
 """
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, coldef: str) -> None:
+    """`CREATE TABLE IF NOT EXISTS` above only creates the table on a brand
+    new database - it does nothing for a column added later to a table
+    that already exists (this project's real one, with real rows, already
+    did). This is the idempotent `ALTER TABLE` that actually lands it."""
+    cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coldef}")
+
+
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # Added for Quick Apply (see routers/queue.py's quick_apply) - a
+        # manually-entered posting's own stated post date, since nothing
+        # fetched it to know one otherwise.
+        _ensure_column(conn, "opportunities", "posted_at", "TEXT")
+        # Set once, at import time (CSV/XLSX upload and Fetch's "Queue
+        # after fetch"), when the row's company already shows up in the
+        # profile's Applied sheet - a flag for the Queue table to surface,
+        # not a block (see routers/queue.py's _dedupe_and_insert).
+        _ensure_column(conn, "opportunities", "company_seen", "INTEGER NOT NULL DEFAULT 0")
+        # JSON-encoded list of {title, date, stage} - the past application(s)
+        # at this row's company, as of import time, for the Queue table's
+        # hover-for-detail on the company_seen flag above. NULL/"[]" when
+        # company_seen is 0.
+        _ensure_column(conn, "opportunities", "company_seen_detail", "TEXT")
 
 
 @contextmanager

@@ -100,6 +100,14 @@ export interface TemplateInput {
 
 export type OpportunityStatus = "queued" | "generating" | "ready" | "failed";
 
+// One past application at a company the Queue table is flagging a new
+// row against - see Opportunity.company_seen_detail.
+export interface CompanyMatch {
+  title: string;
+  date: string;
+  stage: string;
+}
+
 export interface Opportunity {
   id: number;
   profile: string;
@@ -113,6 +121,14 @@ export interface Opportunity {
   error: string | null;
   resume_json: string | null;
   staging_dir: string | null;
+  posted_at: string | null;
+  // Set once at import time (CSV/XLSX or Fetch's "Queue after fetch") if
+  // this company already showed up in the Applied sheet - a flag to
+  // surface in the table, not a dedupe block.
+  company_seen: boolean;
+  // The actual past application(s) at that company (title/date/stage),
+  // same snapshot-at-import-time as company_seen above.
+  company_seen_detail: CompanyMatch[];
   created_at: string;
   updated_at: string;
 }
@@ -121,9 +137,6 @@ export const SOURCE_OPTIONS = [
   { id: "linkedin", label: "LinkedIn", domain: "linkedin.com" },
   { id: "indeed", label: "Indeed", domain: "indeed.com" },
   { id: "dice", label: "Dice", domain: "dice.com" },
-  { id: "remotive", label: "Remotive", domain: "remotive.com" },
-  { id: "remoteok", label: "RemoteOK", domain: "remoteok.com" },
-  { id: "weworkremotely", label: "We Work Remotely", domain: "weworkremotely.com" },
   { id: "jobgether", label: "Jobgether", domain: "jobgether.com" },
   { id: "jobright", label: "Jobright", domain: "jobright.ai" },
   { id: "himalayas", label: "Himalayas", domain: "himalayas.app" },
@@ -141,8 +154,8 @@ export const SOURCE_OPTIONS = [
 
 // Google's favicon service, keyed by domain - gets every source's real logo
 // without needing a brand-icon library that wouldn't cover the smaller job
-// boards (Dice, Jobgether, Jobright, RemoteOK, Remotive, We Work Remotely
-// aren't in most icon packs; this covers all eleven uniformly).
+// boards (Dice, Jobgether, Jobright aren't in most icon packs; this covers
+// all of them uniformly).
 export function sourceIconUrl(domain: string) {
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
 }
@@ -272,6 +285,26 @@ export async function importFetchResults(profile: string, rows: GateResult[]) {
       })),
     },
   );
+  return data;
+}
+
+// A single posting entered by hand - a recruiter email, something found
+// outside the normal Fetch pipeline - skipped straight to the queue and
+// generation, same dedupe as every other import path. `id: null` means
+// the dedupe caught it as a repeat (already applied-to or already
+// queued), not that something failed.
+export interface QuickApplyInput {
+  profile: string;
+  company: string;
+  title: string;
+  source: string;
+  posted_at: string;
+  url: string;
+  description: string;
+}
+
+export async function quickApply(input: QuickApplyInput) {
+  const { data } = await api.post<{ id: number | null; duplicate: boolean }>("/queue/quick-apply", input);
   return data;
 }
 

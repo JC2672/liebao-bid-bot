@@ -18,7 +18,7 @@
 // every profile pointed at this sheet.
 
 const SECRET = "REPLACE_WITH_A_LONG_RANDOM_STRING";
-const HEADER = ["Date", "Company", "Title", "Source", "Job URL"];
+const HEADER = ["Date", "Company", "Title", "Source", "Job URL", "Stage"];
 
 function doPost(e) {
   const body = JSON.parse(e.postData.contents);
@@ -38,7 +38,18 @@ function doPost(e) {
   }
 
   if (body.action === "append") {
-    sheet.appendRow([body.date, body.company, body.title, body.source, body.url]);
+    // Written by matching each existing column's own header text, not a
+    // fixed position - so a tab whose "Stage" column was added by hand in
+    // a different spot (or isn't there at all, for an older tab) still
+    // gets the right value in the right place, instead of this assuming
+    // every tab's columns line up with the HEADER constant above.
+    const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const fieldsByHeader = {
+      Date: body.date, Company: body.company, Title: body.title,
+      Source: body.source, "Job URL": body.url, Stage: body.stage || "Applied",
+    };
+    const values = header.map((h) => (h in fieldsByHeader ? fieldsByHeader[h] : ""));
+    sheet.appendRow(values);
     return respond({ ok: true });
   }
 
@@ -49,6 +60,32 @@ function doPost(e) {
     const urlCol = header.indexOf("Job URL");
     const urls = rows.slice(1).map((r) => r[urlCol]).filter(Boolean);
     return respond({ urls: urls });
+  }
+
+  if (body.action === "get_applied_rows_for_companies") {
+    // Filtered to just the companies the caller actually asked about
+    // (an import batch's own company names), not the whole sheet - the
+    // Queue table's company-dupe flag shows *which* past application(s)
+    // at that company it's flagging against (title/date/stage), but
+    // there's no reason to ship back someone's entire applied history to
+    // answer that for one import's worth of companies. Column lookups by
+    // header name, same reasoning as "append" above - works whether or
+    // not "Stage" exists on this tab.
+    const wanted = new Set((body.companies || []).map((c) => String(c).trim().toLowerCase()));
+    const rows = sheet.getDataRange().getValues();
+    if (rows.length < 2 || wanted.size === 0) return respond({ rows: [] });
+    const header = rows[0];
+    const col = {
+      date: header.indexOf("Date"), company: header.indexOf("Company"),
+      title: header.indexOf("Title"), stage: header.indexOf("Stage"),
+    };
+    const out = rows.slice(1)
+      .filter((r) => r[col.company] && wanted.has(String(r[col.company]).trim().toLowerCase()))
+      .map((r) => ({
+        company: r[col.company], title: col.title >= 0 ? r[col.title] : "",
+        date: col.date >= 0 ? r[col.date] : "", stage: col.stage >= 0 ? r[col.stage] : "",
+      }));
+    return respond({ rows: out });
   }
 
   return respond({ error: "unknown action: " + body.action });

@@ -9,7 +9,7 @@ type SidebarItem = "profiles" | "templates" | "fields";
 const SIDEBAR_ITEMS: [SidebarItem, string, typeof User][] = [
   ["profiles", "Profiles", User],
   ["templates", "Templates", LayoutTemplate],
-  ["fields", "Job Categories", SlidersHorizontal],
+  ["fields", "Searches", SlidersHorizontal],
 ];
 
 /** Setup gathers every "configure this once, not a daily-use tab" screen
@@ -28,7 +28,7 @@ export function SetupPage() {
       <div>
         <h1 className="text-lg font-semibold">Setup</h1>
         <p className="text-sm text-fg-muted">
-          Profiles, resume templates, and job categories - set up once, not a daily-use screen.
+          Profiles, resume templates, and searches - set up once, not a daily-use screen.
         </p>
       </div>
 

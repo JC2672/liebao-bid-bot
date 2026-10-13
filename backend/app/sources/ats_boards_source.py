@@ -10,8 +10,8 @@ the three APIs honor a search-shaped param at all: `search`/`q`/`query`/
 702-job list for a real board (Stripe), regardless of value. Unlike
 Jobright, there's no server-side lever here whatsoever - these are pure
 per-company job listings, so title/location/remote filtering happens
-entirely client-side below, same pattern as Arbeitnow/RemoteOK/Working
-Nomads. Without it, the noise looks a lot like Jobright's pre-fix problem:
+entirely client-side below, same pattern as Arbeitnow/Working Nomads.
+Without it, the noise looks a lot like Jobright's pre-fix problem:
 of ~8,900 Greenhouse jobs fanned out across every company, only ~31 even
 have a Salesforce-relevant title, and most of those are non-US offices
 (Bangalore, Gurugram, Warsaw, Poland, Norway...) or don't say "remote" at

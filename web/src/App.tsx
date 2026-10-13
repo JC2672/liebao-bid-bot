@@ -5,6 +5,7 @@ import { FetchPage } from "./pages/FetchPage";
 import { QueuePage } from "./pages/QueuePage";
 import { SetupPage } from "./pages/SetupPage";
 import { GenerationStatusWidget } from "./components/GenerationStatusWidget";
+import { QuickApplyPanel } from "./components/QuickApplyPanel";
 import { ThemeToggle } from "./components/ThemeToggle";
 
 const queryClient = new QueryClient();
@@ -171,6 +172,7 @@ function App() {
             the same way, not just while the Queue tab happens to be
             open. */}
         <GenerationStatusWidget />
+        <QuickApplyPanel hidden={tab === "setup"} />
 
         {/*
           Every tab stays mounted; only visibility toggles. Fetch results, in
